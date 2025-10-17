@@ -1,10 +1,10 @@
 # how-fast-5090
 
-How fast RTX 5090 vs H100 SXM on SLM Qwen3 1.7B full parameter finetuning using PyTorch 2.8.0 CUDA 12.9?
+How fast RTX 5090 vs H100 SXM on SLM Qwen3 1.7B full parameter finetuning using PyTorch 2.8.0 CUDA 12.8?
 
 ## Hyperparameters
 
-1. 81920 tokens batch size.
+1. 81920 tokens batch size, 1 row is 4096 tokens, so 20 batch size equal to 81920.
 2. AdamW optimizer.
 3. BF16 weight load same goes to activation, gradient and optimizer states.
 4. Gradient checkpointing.
@@ -33,3 +33,13 @@ For H100,
 ```bash
 bash h100.sh
 ```
+
+## WanDB
+
+https://wandb.ai/aies-scicom-scicom-ai/how-fast-5090
+
+## Cost
+
+Even though H100 SXM is faster but H100 SXM is $2.038/h while RTX 5090 only $0.555/h,
+
+<img src="price.png" width="50%">
