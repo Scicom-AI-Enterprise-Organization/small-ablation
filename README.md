@@ -4,7 +4,7 @@ How fast RTX 5090 vs H100 SXM on SLM Qwen3 1.7B full parameter finetuning using 
 
 ## Hyperparameters
 
-1. 81920 tokens batch size, 1 row is 4096 tokens, so 20 batch size equal to 81920.
+1. 81920 tokens batch size, 1 row is 4096 tokens multipacking with proper cumulative lengths, so 20 batch size equal to 81920.
 2. AdamW optimizer.
 3. BF16 weight load same goes to activation, gradient and optimizer states.
 4. Gradient checkpointing.
