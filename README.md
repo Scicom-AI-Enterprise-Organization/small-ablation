@@ -38,8 +38,53 @@ bash h100.sh
 
 https://wandb.ai/aies-scicom-scicom-ai/how-fast-5090
 
+<img src="wandb.png" width="50%">
+
 ## Cost
 
 Even though H100 SXM is faster but H100 SXM is $2.038/h while RTX 5090 only $0.555/h,
 
 <img src="price.png" width="50%">
+
+Given,
+
+| GPU          | Time                          | Rate ($/hr)   |
+| ------------ | ----------------------------- | ------------- |
+| **H100 SXM** | 47 min = 47/60 = **0.7833 h** | **2.038 $/h** |
+| **RTX 5090** | 96 min = 96/60 = **1.6 h**    | **0.555 $/h** |
+
+### Cost to complete the job
+
+Cost = Rate x Time
+
+H100 SXM:
+2.038 x 0.7833 = $1.595
+
+RTX 5090:
+0.555 x 1.6 = $0.888
+
+- 5090 is cheaper per job, about 44% lower total cost.
+
+### Performance ratio
+
+Speed ratio = 96/47 = 2.04
+
+- H100 SXM is roughly 2x faster.
+
+### Cost per unit of work (normalized)
+
+| GPU      | Cost per minute ($)  | Relative cost per unit of work |
+| -------- | -------------------- | ------------------------------ |
+| H100 SXM | 2.038 / 60 = 0.0340  | (1.595 / 47) = 0.0339          |
+| RTX 5090 | 0.555 / 60 = 0.00925 | (0.888 / 96) = 0.00925         |
+
+So H100 SXM costs ~3.67x more per minute of compute.
+
+### Conclusion
+
+| Metric                   | H100 SXM     | RTX 5090    | Which is Better                        |
+| ------------------------ | ------------ | ----------- | -------------------------------------- |
+| Time to complete         | 47 min       | 96 min      | **H100** (~2x faster)                  |
+| Cost per run             | $1.60        | $0.89       | **5090** (~44% cheaper)                |
+| Cost per unit of compute | 3.67x higher | 1x baseline | **5090**                               |
+| Speed per dollar         | 0.56x        | 1x baseline | **5090 (~80% better cost-efficiency)** |
