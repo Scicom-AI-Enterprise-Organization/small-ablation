@@ -19,7 +19,11 @@ hf download malaysia-ai/multipacking-multilingual-tts-10k-qwen3 --repo-type=data
 3. Run quick finetuning,
 
 ```bash
-bash liger.sh
-bash cce.sh
-bash cce-kahan.sh
+bash liger-bf16.sh
 ```
+
+## WanDB
+
+We also recorded MFU and Throughput per second, WanDB project at https://wandb.ai/aies-scicom-scicom-ai/small-malaysian-lm
+
+<img src="pics/wandb.png" width="50%">
