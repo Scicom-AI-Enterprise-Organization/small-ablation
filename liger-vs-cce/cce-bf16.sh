@@ -1,6 +1,6 @@
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 WANDB_PROJECT="liger-vs-cce" \
-WANDB_NAME="cce-loss-cce-kahan" \
+WANDB_NAME="cce-loss-cce-bf16-bf16" \
 TORCH_DISTRIBUTED_DEBUG="info" \
 CUDA_VISIBLE_DEVICES="0" \
 python3 train.py \
@@ -20,5 +20,5 @@ python3 train.py \
 --remove_unused_columns false \
 --include_num_input_tokens_seen true \
 --use_liger false \
---cce_impl "cce_kahan_full_c" \
+--cce_impl "cce" \
 --lr_scheduler_type "constant_with_warmup"

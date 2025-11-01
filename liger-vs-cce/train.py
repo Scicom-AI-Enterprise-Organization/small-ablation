@@ -81,6 +81,7 @@ class ModelArguments:
     )
     use_liger: bool = field(default=True, metadata={"help": "Use liger loss"}, )
     cce_impl: str = field(default="cce_kahan_full_c", metadata={"help": "CCE implementation"}, )
+    model_dtype: str = field(default="bfloat16", metadata={"help": "model dtype"}, )
 
 
 @dataclass
@@ -260,7 +261,7 @@ def main():
     model = model_class.from_pretrained(
         model_args.model_name_or_path,
         attn_implementation = 'flash_attention_3',
-        torch_dtype = torch.bfloat16,
+        torch_dtype = model_args.model_dtype,
     )
     if not model_args.use_liger:
         model.config.cce_impl = model_args.cce_impl

@@ -1,6 +1,6 @@
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 WANDB_PROJECT="liger-vs-cce" \
-WANDB_NAME="liger-loss" \
+WANDB_NAME="liger-loss-bf16-bf16-bs4" \
 TORCH_DISTRIBUTED_DEBUG="info" \
 CUDA_VISIBLE_DEVICES="0" \
 python3 train.py \
