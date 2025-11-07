@@ -37,7 +37,7 @@ For GPU 0,
     step == 0
         if step + 1 != comm.world_size: True
             send k, v to send
-            receive v1, v1 from receive
+            receive k1, v1 from receive
 
         if not is_causal or step <= comm.rank: True
             calculate attention with is_causal and step == 0, so this causal
