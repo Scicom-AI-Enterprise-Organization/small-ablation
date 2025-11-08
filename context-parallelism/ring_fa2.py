@@ -4,8 +4,6 @@ but update latest parameters for FA2 2.8.3
 """
 
 import torch
-import torch.distributed as dist
-import math
 from flash_attn.flash_attn_interface import _flash_attn_forward, _flash_attn_backward
 from utils import merge_attention, RingComm
 

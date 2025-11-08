@@ -4,8 +4,6 @@ But follow api from https://github.com/Dao-AILab/flash-attention/blob/main/hoppe
 """
 
 import torch
-import torch.distributed as dist
-import math
 from flash_attn_interface import _flash_attn_forward, _flash_attn_backward
 from utils import merge_attention, RingComm
 

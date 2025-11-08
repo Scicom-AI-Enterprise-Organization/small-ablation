@@ -21,10 +21,12 @@ q0    o x | x x
       ---------
 q1    o o | o x
       o o | o o
-
 ```
 
 For GPU 0,
+
+- q0k0v0 is causal.
+- q0k1v1 not required to do anything.
 
 ```
     cp_rank = 0
@@ -54,6 +56,9 @@ For GPU 0,
 ```
 
 For GPU 1,
+
+- q1k0v0 is full.
+- q0k1v1 is causal.
 
 ```
     cp_rank = 1
@@ -85,3 +90,7 @@ For GPU 1,
 ```
 
 Everything hit as it is.
+
+#### Limitation
+
+1. Some GPUs required less computation such as GPU 0, not required to compute q0k1v1.
