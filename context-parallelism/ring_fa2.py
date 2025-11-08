@@ -1,5 +1,5 @@
 """
-Heavily borrow from
+Heavily borrow from https://github.com/zhuzilin/ring-flash-attention/blob/main/ring_flash_attn/ring_flash_attn.py
 but update latest parameters for FA2 2.8.3
 """
 
