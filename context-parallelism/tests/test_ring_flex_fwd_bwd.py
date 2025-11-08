@@ -4,13 +4,11 @@ import os
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
 
-from ring_flex import ring_flex_attn
-from utils import causal_mask
 from torch.nn.attention.flex_attention import flex_attention, create_block_mask
 import torch
 import torch.distributed as dist
-import os
-import math
+from ring_flex import ring_flex_attn
+from utils import causal_mask
 
 if __name__ == "__main__":
     world_size = int(os.environ['LOCAL_WORLD_SIZE'])
@@ -18,7 +16,7 @@ if __name__ == "__main__":
     dist.init_process_group(backend='nccl')
 
     batch_size = 1
-    seqlen = 150
+    seqlen = 100 * world_size
     nheads = 16
     d = 128
 
@@ -67,6 +65,6 @@ if __name__ == "__main__":
 
 """
 torchrun \
---nproc_per_node 3 \
+--nproc_per_node 4 \
 tests/test_ring_flex_fwd_bwd.py
 """

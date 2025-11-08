@@ -6,7 +6,7 @@ sys.path.insert(0, parent_dir)
 
 import torch
 import torch.distributed as dist
-from ring_fa3 import ring_flash_attn
+from ring_fa3_v2 import ring_flash_attn
 from flash_attn import flash_attn_func
 
 if __name__ == "__main__":
