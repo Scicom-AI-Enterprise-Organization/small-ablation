@@ -1,11 +1,6 @@
-"""
-Heavily borrow from https://github.com/zhuzilin/ring-flash-attention/blob/main/ring_flash_attn/ring_flash_attn.py
-But follow api from https://github.com/Dao-AILab/flash-attention/blob/main/hopper/flash_attn_interface.py
-"""
-
 import torch
 from flash_attn_interface import _flash_attn_forward, _flash_attn_backward
-from utils import merge_attention, RingComm
+from utils_v2 import merge_attention, RingComm
 
 def _forward(
     process_group,
@@ -19,20 +14,29 @@ def _forward(
     q: [B, L, H, D]
     k: [B, L, H, D]
     v: [B, L, H, D]
+    Overlap pattern:
+      - post recv of next_k/next_v early (post_kv)
+      - compute attention on current k/v (flash_attn)
+      - wait for transfer to complete only when we need to swap in the received k/v
+      - repeat
     """
     comm = RingComm(process_group)
     out = None
     lse = None
-    next_k, next_v = None, None
+
+    k_buffer = torch.empty_like(k)
+    v_buffer = torch.empty_like(v)
+
+    next_k = next_v = None
+    if comm.world_size > 1:
+        next_k, next_v = comm.post_kv(k, v, k_buffer, v_buffer)
 
     for step in range(comm.world_size):
-        if step + 1 != comm.world_size:
-            next_k, next_v = comm.send_recv_kv(k, v)
+        do_compute = (not causal) or (step <= comm.rank)
 
-        if not causal or step <= comm.rank:
+        if do_compute:
+            fwd_causal = causal and step == 0
             with torch.no_grad():
-                fwd_causal = causal and step == 0
-
                 out, softmax_lse, *rest = _flash_attn_forward(
                     q,
                     k,
@@ -54,16 +58,23 @@ def _forward(
                     sm_margin=0,
                 )
                 block_out, block_lse = out, softmax_lse
-                
+
                 block_lse = block_lse.transpose(1, 2)
                 out, lse = merge_attention(out, lse, block_out, block_lse)
                 out = out.to(q.dtype)
-        
+
         if step + 1 != comm.world_size:
             comm.wait()
+
             k, v = next_k, next_v
-    
+            k_buffer = torch.empty_like(k)
+            v_buffer = torch.empty_like(v)
+
+            next_k, next_v = comm.post_kv(k, v, k_buffer, v_buffer)
+
+    comm.wait()
     return out, lse
+
 
 def _backward(
     process_group,
@@ -77,22 +88,38 @@ def _backward(
     scale: float,
     causal: bool = True,
 ):
+    """
+    Backward using same overlap/double-buffering idea for dk/dv reductions.
+    We'll:
+      - post recv of next k/v early
+      - compute local grads (dq, dk_local, dv_local) via _flash_attn_backward into per-block buffers
+      - accumulate local dq immediately
+      - for dk/dv across blocks, use a second ring to send partial dk/dv around the ring.
+    """
+
     kv_comm = RingComm(process_group)
     d_kv_comm = RingComm(process_group)
-    dq, dk, dv = None, None, None
 
-    block_dq_buffer = torch.empty(q.shape, dtype=q.dtype, device=q.device)
-    block_dk_buffer = torch.empty(k.shape, dtype=k.dtype, device=k.device)
-    block_dv_buffer = torch.empty(v.shape, dtype=v.dtype, device=v.device)
+    dq = None
+    block_dq_buffer = torch.empty_like(q)
+    block_dk_buffer = torch.empty_like(k)
+    block_dv_buffer = torch.empty_like(v)
 
-    next_dk, next_dv = None, None
-    next_k, next_v = None, None
+    k_buffer = torch.empty_like(k)
+    v_buffer = torch.empty_like(v)
+
+    dk_buffer = torch.empty_like(k)
+    dv_buffer = torch.empty_like(v)
+
+    next_k = next_v = None
+    if kv_comm.world_size > 1:
+        next_k, next_v = kv_comm.post_kv(k, v, k_buffer, v_buffer)
+
+    next_dk = next_dv = None
 
     for step in range(kv_comm.world_size):
-        if step + 1 != kv_comm.world_size:
-            next_k, next_v = kv_comm.send_recv_kv(k, v)
-
-        if not causal or step <= kv_comm.rank:
+        do_compute = (not causal) or (step <= kv_comm.rank)
+        if do_compute:
             bwd_causal = causal and step == 0
 
             _flash_attn_backward(
@@ -117,46 +144,58 @@ def _backward(
             )
 
             if dq is None:
+                # use float32 accumulation for stability then cast back later
                 dq = block_dq_buffer.to(torch.float32)
-                dk = block_dk_buffer.to(torch.float32)
-                dv = block_dv_buffer.to(torch.float32)
             else:
-                dq += block_dq_buffer
-                d_kv_comm.wait()
-                dk = block_dk_buffer + next_dk
-                dv = block_dv_buffer + next_dv
-        
-        elif step != 0:
-            d_kv_comm.wait()
-            dk, dv = next_dk, next_dv
+                dq += block_dq_buffer.to(torch.float32)
+
+            local_dk = block_dk_buffer.to(torch.float32)
+            local_dv = block_dv_buffer.to(torch.float32)
+        else:
+            local_dk = torch.zeros_like(k, dtype=torch.float32)
+            local_dv = torch.zeros_like(v, dtype=torch.float32)
+
+        next_dk_recv = d_kv_comm.send_recv(local_dk, dk_buffer)
+        next_dv_recv = d_kv_comm.send_recv(local_dv, dv_buffer)
+        d_kv_comm.post()
 
         if step + 1 != kv_comm.world_size:
             kv_comm.wait()
             k, v = next_k, next_v
-        
-        next_dk, next_dv = d_kv_comm.send_recv_kv(dk, dv)
-    
+            k_buffer = torch.empty_like(k)
+            v_buffer = torch.empty_like(v)
+            next_k, next_v = kv_comm.post_kv(k, v, k_buffer, v_buffer)
+
+        d_kv_comm.wait()
+
+        if next_dk is None:
+            next_dk = next_dk_recv.to(torch.float32)
+            next_dv = next_dv_recv.to(torch.float32)
+        else:
+            next_dk = next_dk + next_dk_recv.to(torch.float32)
+            next_dv = next_dv + next_dv_recv.to(torch.float32)
+
+    kv_comm.wait()
     d_kv_comm.wait()
-    
-    return dq.to(q.dtype), next_dk.to(q.dtype), next_dv.to(q.dtype)
+
+    if dq is None:
+        dq = torch.zeros_like(q)
+    dq = dq.to(q.dtype)
+    dk = next_dk.to(q.dtype) if next_dk is not None else torch.zeros_like(k)
+    dv = next_dv.to(q.dtype) if next_dv is not None else torch.zeros_like(v)
+
+    return dq, dk, dv
+
 
 class RingFlashAttnFunc(torch.autograd.Function):
     @staticmethod
-    def forward(
-        ctx,
-        q,
-        k,
-        v,
-        scale,
-        causal,
-        group,
-    ):
+    def forward(ctx, q, k, v, scale, causal, group):
         if scale is None:
             scale = q.shape[-1] ** (-0.5)
 
         k = k.contiguous()
         v = v.contiguous()
-        out, lse = _forward(group, q, k, v, scale=scale)
+        out, lse = _forward(group, q, k, v, scale=scale, causal=causal)
         ctx.save_for_backward(q, k, v, out, lse)
         ctx.scale = scale
         ctx.causal = causal
@@ -178,14 +217,8 @@ class RingFlashAttnFunc(torch.autograd.Function):
             scale=ctx.scale,
             causal=ctx.causal,
         )
-        return dq, dk, dv, None, None, None, None
+        return dq, dk, dv, None, None, None
 
-def ring_flash_attn(
-    q,
-    k,
-    v,
-    scale=None,
-    causal=False,
-    group=None,
-):
+
+def ring_flash_attn(q, k, v, scale=None, causal=False, group=None):
     return RingFlashAttnFunc.apply(q, k, v, scale, causal, group)
