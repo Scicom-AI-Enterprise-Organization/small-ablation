@@ -1,6 +1,6 @@
 import torch
 from flash_attn.flash_attn_interface import _flash_attn_forward, _flash_attn_backward
-from utils import merge_attention, RingComm
+from utils_v3 import merge_attention, RingComm
 
 # Helper to allocate persistent double buffers
 def _alloc_double_buffers_like(x):

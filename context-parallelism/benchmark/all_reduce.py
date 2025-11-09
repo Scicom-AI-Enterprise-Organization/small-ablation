@@ -1,80 +1,49 @@
-import sys
 import os
-
-parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, parent_dir)
-
-from ring_fa2 import ring_flash_attn
-from flash_attn import flash_attn_func
+import time
 import torch
 import torch.distributed as dist
-import time
 
 def run():
     world_size = int(os.environ['LOCAL_WORLD_SIZE'])
     local_rank = int(os.environ['LOCAL_RANK'])
 
-    batch_size = 1
-    seqlen = 8192
-    nheads = 16
-    d = 128
-
+    torch.cuda.set_device(local_rank)
     device = torch.device(f'cuda:{local_rank}')
-    dtype = torch.bfloat16
 
-    assert seqlen % world_size == 0
-    assert d % 8 == 0
+    tensor_size_mb = 512
+    tensor = torch.ones(tensor_size_mb * 250_000, dtype=torch.float32, device=device)
 
-    qkv = torch.randn(
-        3, batch_size, seqlen, nheads, d, device=device, dtype=dtype, requires_grad=True,
-    )
-    dist.broadcast(qkv, src=0)
+    num_iters = 10
+    times = []
 
-    dout = torch.randn(batch_size, seqlen, nheads, d, device=device, dtype=dtype)
-    dist.broadcast(dout, src=0)
+    for _ in range(num_iters):
+        dist.barrier()
+        torch.cuda.synchronize()
+        t0 = time.time()
 
-    local_qkv = qkv.chunk(world_size, dim=-3)[local_rank]
-    local_dout = dout.chunk(world_size, dim=-3)[local_rank].clone().detach()
+        dist.all_reduce(tensor)
 
-    local_q = local_qkv[0].clone().detach().requires_grad_(True)
-    local_k = local_qkv[1].clone().detach().requires_grad_(True)
-    local_v = local_qkv[2].clone().detach().requires_grad_(True)
+        torch.cuda.synchronize()
+        dist.barrier()
+        times.append(time.time() - t0)
 
-    local_out, local_lse = ring_flash_attn(q=local_q, k=local_k, v=local_v, causal=True)
-    local_out.backward(local_dout)
+    if local_rank == 0:
+        avg_time = sum(times) / len(times)
+        data_gb = tensor.element_size() * tensor.numel() / 1e9
+        print(f"Average AllReduce time: {avg_time:.4f}s | Bandwidth: {data_gb/avg_time:.2f} GB/s")
 
 if __name__ == "__main__":
-    dist.init_process_group(backend='nccl')
-    local_rank = int(os.environ['LOCAL_RANK'])
-    
-    warmup = 3
-    repeat = 10
-    for _ in range(warmup):
-        run()
-        torch.cuda.synchronize()
-        dist.barrier()
-    
-    torch.cuda.synchronize()
-    dist.barrier()
-    start = time.time()
-    for _ in range(repeat):
-        run()
-        torch.cuda.synchronize()
-        dist.barrier()
-
-    end = time.time()
-    avg_time = (end - start) / repeat
-    if local_rank == 0:
-        print(f"Average step time: {avg_time:.4f} sec")
-
+    local_rank = int(os.environ["LOCAL_RANK"])
+    dist.init_process_group(backend="nccl", device_id=local_rank)
+    run()
     dist.destroy_process_group()
 
 """
 torchrun \
 --nproc_per_node 4 \
-benchmark/test_ring_fa2_fwd_bwd.py
+benchmark/all_reduce.py
 
-Average step time: 0.0044 sec
+Average AllReduce time: 0.0024s | Bandwidth: 214.65 GB/s
 """
 
 """

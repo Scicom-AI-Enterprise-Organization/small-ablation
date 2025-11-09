@@ -4,7 +4,7 @@ import os
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
 
-from ring_fa2 import ring_flash_attn
+from ring_fa3 import ring_flash_attn
 from flash_attn import flash_attn_func
 import torch
 import torch.distributed as dist
@@ -72,9 +72,9 @@ if __name__ == "__main__":
 """
 torchrun \
 --nproc_per_node 4 \
-benchmark/test_ring_fa2_fwd_bwd.py
+benchmark/test_ring_fa3_fwd_bwd.py
 
-Average step time: 0.0044 sec
+Average step time: 0.0037 sec
 """
 
 """

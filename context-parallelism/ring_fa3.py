@@ -33,7 +33,7 @@ def _forward(
             with torch.no_grad():
                 fwd_causal = causal and step == 0
 
-                out, softmax_lse, *rest = _flash_attn_forward(
+                out_, softmax_lse, *rest = _flash_attn_forward(
                     q,
                     k,
                     v,
@@ -53,7 +53,7 @@ def _forward(
                     softcap=0.0,
                     sm_margin=0,
                 )
-                block_out, block_lse = out, softmax_lse
+                block_out, block_lse = out_, softmax_lse
                 
                 block_lse = block_lse.transpose(1, 2)
                 out, lse = merge_attention(out, lse, block_out, block_lse)
