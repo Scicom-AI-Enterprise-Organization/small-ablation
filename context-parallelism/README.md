@@ -31,64 +31,66 @@ For GPU 0,
 - q0k1v1 not required to do anything.
 
 ```
-    cp_rank = 0
-    cp_world_size = 2
-    send = (cp_rank + 1) % cp_world_size = 1
-    receive = (cp_rank - 1) % cp_world_size = 1
-    k = k0
-    v = v0
+cp_rank = 0
+cp_world_size = 2
+send = (cp_rank + 1) % cp_world_size = 1
+receive = (cp_rank - 1) % cp_world_size = 1
+q = q0
+k = k0
+v = v0
 
-    step == 0
-        if step + 1 != comm.world_size: True
-            send k, v to send
-            receive k1, v1 from receive
+step == 0
+    if step + 1 != comm.world_size: True
+        send k, v to send
+        receive k1, v1 from receive
 
-        if not is_causal or step <= comm.rank: True
-            calculate attention with is_causal and step == 0, so this causal
+    if not is_causal or step <= comm.rank: True
+        calculate attention with is_causal and step == 0, so this causal # ✅ q0k0v0
 
-        if step + 1 != comm.world_size: True
-        k = k1
-        v = v1
+    if step + 1 != comm.world_size: True
+    k = k1
+    v = v1
 
-    step == 1
+step == 1
 
-        if step + 1 != comm.world_size: False
-        if not is_causal or step <= comm.rank: False
-        if step + 1 != comm.world_size: False
+    if step + 1 != comm.world_size: False
+    if not is_causal or step <= comm.rank: False
+    if step + 1 != comm.world_size: False
 ```
 
 For GPU 1,
 
 - q1k0v0 is full.
-- q0k1v1 is causal.
+- q1k1v1 is causal.
 
 ```
-    cp_rank = 1
-    cp_world_size = 2
-    send = (cp_rank + 1) % cp_world_size = 0
-    receive = (cp_rank - 1) % cp_world_size = 0
-    k = k1
-    v = v1
+cp_rank = 1
+cp_world_size = 2
+send = (cp_rank + 1) % cp_world_size = 0
+receive = (cp_rank - 1) % cp_world_size = 0
+q = q1
+k = k1
+v = v1
 
-    step == 0
-        if step + 1 != comm.world_size: True
-            send k, v to send
-            receive k0, v0 from receive
+step == 0
+    if step + 1 != comm.world_size: True
+        send k, v to send
+        receive k0, v0 from receive
 
-        if not is_causal or step <= comm.rank: True
-            calculate attention with is_causal and step == 0, so this causal
+    if not is_causal or step <= comm.rank: True
+        calculate attention with is_causal and step == 0, so this causal, # ✅ q1k1v1
 
-        if step + 1 != comm.world_size: True
-        k = k0
-        v = v0
+    if step + 1 != comm.world_size: True
+    k = k0
+    v = v0
 
-    step == 1
-        if step + 1 != comm.world_size: False
+step == 1
+    if step + 1 != comm.world_size: False
 
-        if not is_causal or step <= comm.rank: True
-            calculate attention with is_causal and step == 1, full attention
+    if not is_causal or step <= comm.rank: True
+        calculate attention with is_causal and step == 1, full attention # ✅ q1k0v0
 
-        if step + 1 != comm.world_size: False
+    if step + 1 != comm.world_size: False
 ```
 
 Everything hit as it is.
@@ -99,18 +101,19 @@ Because for each GPU we have global out, global LSE, global ∂out, global ∂LS
 
 - assumed backward function will overwrite ∂q, ∂k, ∂v when the parameter is ∂(global out, global LSE, global ∂out, q, k, v, ∂q, ∂k, ∂v)
 - We know during forward,
--- For GPU 0, attention calculated as q0k0v0 + q0k1v1
--- For GPU 1, attention calculated as q1k0v0 + q1k1v1
+    - For GPU 0, attention calculated as q0k0v0 + q0k1v1
+    - For GPU 1, attention calculated as q1k0v0 + q1k1v1
 
 - For GPU 0, attention calculated as q0k0v0 + q0k1v1,
--- to calculate ∂q0, you required to calculate ∂(global out, global LSE, global ∂out, q0, k0, v0, ∂q0, ∂k0, ∂v0) + ∂(global out, global LSE, global ∂out, q0, k1, v1, ∂q0, ∂k1, ∂v1)
--- to calculate ∂k0, you required to calculate ∂(global out, global LSE, global ∂out, q0, k0, v0, ∂q0, ∂k0, ∂v0) + ∂(global out, global LSE, global ∂out, q1, k0, v0, ∂q1, ∂k0, ∂v0)
--- to calculate ∂v0, you required to calculate ∂(global out, global LSE, global ∂out, q0, k0, v0, ∂q0, ∂k0, ∂v0) + ∂(global out, global LSE, global ∂out, q1, k0, v0, ∂q1, ∂k0, ∂v0)
+    - to calculate ∂q0, you required to calculate ∂(global out, global LSE, global ∂out, q0, k0, v0, ∂q0, ∂k0, ∂v0) + ∂(global out, global LSE, global ∂out, q0, k1, v1, ∂q0, ∂k1, ∂v1)
+    - to calculate ∂k0, you required to calculate ∂(global out, global LSE, global ∂out, q0, k0, v0, ∂q0, ∂k0, ∂v0) + ∂(global out, global LSE, global ∂out, q1, k0, v0, ∂q1, ∂k0, ∂v0)
+    - to calculate ∂v0, you required to calculate ∂(global out, global LSE, global ∂out, q0, k0, v0, ∂q0, ∂k0, ∂v0) + ∂(global out, global LSE, global ∂out, q1, k0, v0, ∂q1, ∂k0, ∂v0)
 
 - For GPU 1, attention calculated as q1k0v0 + q1k1v1,
--- to calculate ∂q1, you required to calculate ∂(global out, global LSE, global ∂out, q1, k0, v0, ∂q1, ∂k0, ∂v0) + ∂(global out, global LSE, global ∂out, q1, k1, v1, ∂q1, ∂k1, ∂v1)
--- to calculate ∂k1, you required to calculate ∂(global out, global LSE, global ∂out, q0, k1, v1, ∂q0, ∂k1, ∂v1) + ∂(global out, global LSE, global ∂out, q1, k1, v1, ∂q1, ∂k1, ∂v1)
--- to calculate ∂v1, you required to calculate ∂(global out, global LSE, global ∂out, q0, k1, v1, ∂q0, ∂k1, ∂v1) + ∂(global out, global LSE, global ∂out, q1, k1, v1, ∂q1, ∂k1, ∂v1)
+    - to calculate ∂q1, you required to calculate ∂(global out, global LSE, global ∂out, q1, k0, v0, ∂q1, ∂k0, ∂v0) + ∂(global out, global LSE, global ∂out, q1, k1, v1, ∂q1, ∂k1, ∂v1)
+    - to calculate ∂k1, you required to calculate ∂(global out, global LSE, global ∂out, q0, k1, v1, ∂q0, ∂k1, ∂v1) + ∂(global out, global LSE, global ∂out, q1, k1, v1, ∂q1, ∂k1, ∂v1)
+    - to calculate ∂v1, you required to calculate ∂(global out, global LSE, global ∂out, q0, k1, v1, ∂q0, ∂k1, ∂v1) + ∂(global out, global LSE, global ∂out, q1, k1, v1, ∂q1, ∂k1, ∂v1)
+
 
 #### Limitation
 
