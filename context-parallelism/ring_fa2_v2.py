@@ -1,6 +1,7 @@
 import torch
 from flash_attn.flash_attn_interface import _flash_attn_forward, _flash_attn_backward
-from utils_v2 import merge_attention, RingComm
+from utils import merge_attention
+from utils_v2 import RingComm
 
 def _forward(
     process_group,

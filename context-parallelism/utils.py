@@ -14,14 +14,26 @@ def is_compiled_module(module):
         return False
     return isinstance(module, torch._dynamo.eval_frame.OptimizedModule)
 
+@torch.jit.ignore
+def _to_fp32(x):
+    return x.float() if x.dtype in (torch.bfloat16, torch.float16) else x
+
 def merge_attention(a, lse_a, b, lse_b):
+    """
+    Numerically stable merge in FP32, return original dtypes.
+    a,b: [B, Lq, H, D], lse_*: [B, H, Lq]
+    """
     if a is None:
         return b, lse_b
-    max_lse = torch.maximum(lse_a, lse_b)
-    lse_a = torch.exp(lse_a - max_lse)
-    lse_b = torch.exp(lse_b - max_lse)
-    out = ((a * lse_a[..., None] + b * lse_b[..., None]) / (lse_a + lse_b)[..., None])
-    return out, torch.log(lse_a + lse_b) + max_lse
+    a32, b32 = _to_fp32(a), _to_fp32(b)
+    lse_a32, lse_b32 = _to_fp32(lse_a), _to_fp32(lse_b)
+    max_lse = torch.maximum(lse_a32, lse_b32)
+    lse_a_exp = torch.exp(lse_a32 - max_lse)
+    lse_b_exp = torch.exp(lse_b32 - max_lse)
+    denom = lse_a_exp + lse_b_exp
+    out32 = (a32 * lse_a_exp[..., None] + b32 * lse_b_exp[..., None]) / denom[..., None]
+    lse_out32 = torch.log(denom) + max_lse
+    return out32.to(a.dtype), lse_out32.to(lse_a.dtype)
 
 # https://github.com/zhuzilin/ring-flash-attention/blob/main/ring_flash_attn/utils.py#L53
 

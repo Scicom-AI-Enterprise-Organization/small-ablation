@@ -1,25 +1,5 @@
 import torch
 import torch.distributed as dist
-from typing import Optional, Tuple
-
-causal_mask = lambda b, h, q_idx, kv_idx: q_idx >= kv_idx
-
-def is_compiled_module(module):
-    """
-    Check whether the module was compiled with torch.compile()
-    """
-    if not hasattr(torch, "_dynamo"):
-        return False
-    return isinstance(module, torch._dynamo.eval_frame.OptimizedModule)
-
-def merge_attention(a, lse_a, b, lse_b):
-    if a is None:
-        return b, lse_b
-    max_lse = torch.maximum(lse_a, lse_b)
-    lse_a_exp = torch.exp(lse_a - max_lse)
-    lse_b_exp = torch.exp(lse_b - max_lse)
-    out = ((a * lse_a_exp[..., None] + b * lse_b_exp[..., None]) / (lse_a_exp + lse_b_exp)[..., None])
-    return out, torch.log(lse_a_exp + lse_b_exp) + max_lse
 
 class RingComm:
     """

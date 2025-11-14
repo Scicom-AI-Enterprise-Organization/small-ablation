@@ -23,6 +23,8 @@ q1    o o | o x
       o o | o o
 ```
 
+#### Forward
+
 For GPU 0,
 
 - q0k0v0 is causal.
@@ -91,6 +93,25 @@ For GPU 1,
 
 Everything hit as it is.
 
+#### Backward
+
+Because for each GPU we have global out, global LSE, global ∂out, global ∂LSE, we should able to calculate ∂q, ∂k, ∂v,
+
+- assumed backward function will overwrite ∂q, ∂k, ∂v when the parameter is ∂(global out, global LSE, global ∂out, q, k, v, ∂q, ∂k, ∂v)
+- We know during forward,
+-- For GPU 0, attention calculated as q0k0v0 + q0k1v1
+-- For GPU 1, attention calculated as q1k0v0 + q1k1v1
+
+- For GPU 0, attention calculated as q0k0v0 + q0k1v1,
+-- to calculate ∂q0, you required to calculate ∂(global out, global LSE, global ∂out, q0, k0, v0, ∂q0, ∂k0, ∂v0) + ∂(global out, global LSE, global ∂out, q0, k1, v1, ∂q0, ∂k1, ∂v1)
+-- to calculate ∂k0, you required to calculate ∂(global out, global LSE, global ∂out, q0, k0, v0, ∂q0, ∂k0, ∂v0) + ∂(global out, global LSE, global ∂out, q1, k0, v0, ∂q1, ∂k0, ∂v0)
+-- to calculate ∂v0, you required to calculate ∂(global out, global LSE, global ∂out, q0, k0, v0, ∂q0, ∂k0, ∂v0) + ∂(global out, global LSE, global ∂out, q1, k0, v0, ∂q1, ∂k0, ∂v0)
+
+- For GPU 1, attention calculated as q1k0v0 + q1k1v1,
+-- to calculate ∂q1, you required to calculate ∂(global out, global LSE, global ∂out, q1, k0, v0, ∂q1, ∂k0, ∂v0) + ∂(global out, global LSE, global ∂out, q1, k1, v1, ∂q1, ∂k1, ∂v1)
+-- to calculate ∂k1, you required to calculate ∂(global out, global LSE, global ∂out, q0, k1, v1, ∂q0, ∂k1, ∂v1) + ∂(global out, global LSE, global ∂out, q1, k1, v1, ∂q1, ∂k1, ∂v1)
+-- to calculate ∂v1, you required to calculate ∂(global out, global LSE, global ∂out, q0, k1, v1, ∂q0, ∂k1, ∂v1) + ∂(global out, global LSE, global ∂out, q1, k1, v1, ∂q1, ∂k1, ∂v1)
+
 #### Limitation
 
-1. Some GPUs required less computation such as GPU 0, not required to compute q0k1v1.
+1. Some GPUs required less computation such as GPU 0, not required to compute q0k1v1, introduced unbalanced.

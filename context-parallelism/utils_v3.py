@@ -4,35 +4,6 @@ ChatGPT 5 kinda banger tho, at this point it much better than me for overlapping
 
 import torch
 import torch.distributed as dist
-from typing import Optional, Tuple
-
-causal_mask = lambda b, h, q_idx, kv_idx: q_idx >= kv_idx
-
-def is_compiled_module(module):
-    if not hasattr(torch, "_dynamo"):
-        return False
-    return isinstance(module, torch._dynamo.eval_frame.OptimizedModule)
-
-@torch.jit.ignore
-def _to_fp32(x):
-    return x.float() if x.dtype in (torch.bfloat16, torch.float16) else x
-
-def merge_attention(a, lse_a, b, lse_b):
-    """
-    Numerically stable merge in FP32, return original dtypes.
-    a,b: [B, Lq, H, D], lse_*: [B, H, Lq]
-    """
-    if a is None:
-        return b, lse_b
-    a32, b32 = _to_fp32(a), _to_fp32(b)
-    lse_a32, lse_b32 = _to_fp32(lse_a), _to_fp32(lse_b)
-    max_lse = torch.maximum(lse_a32, lse_b32)
-    lse_a_exp = torch.exp(lse_a32 - max_lse)
-    lse_b_exp = torch.exp(lse_b32 - max_lse)
-    denom = lse_a_exp + lse_b_exp
-    out32 = (a32 * lse_a_exp[..., None] + b32 * lse_b_exp[..., None]) / denom[..., None]
-    lse_out32 = torch.log(denom) + max_lse
-    return out32.to(a.dtype), lse_out32.to(lse_a.dtype)
 
 class RingComm:
     """
