@@ -4,13 +4,15 @@ import os
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
 
-from torch.nn.attention.flex_attention import flex_attention, create_block_mask
+from ring_flex import ring_flex_attn
+from torch.nn.attention.flex_attention import create_block_mask
+from utils import causal_mask
 import torch
 import torch.distributed as dist
 import time
 
 batch_size = 1
-seqlen = 10240
+seqlen = 40960
 nheads = 16
 d = 128
 
@@ -25,21 +27,23 @@ def run():
     assert d % 8 == 0
 
     qkv = torch.randn(
-        3, batch_size, seqlen, nheads, d, device=device, dtype=dtype, requires_grad=True,
+        3, batch_size, nheads, seqlen, d, device=device, dtype=dtype, requires_grad=True,
     )
     dist.broadcast(qkv, src=0)
 
-    dout = torch.randn(batch_size, seqlen, nheads, d, device=device, dtype=dtype)
+    dout = torch.randn(batch_size, nheads, seqlen, d, device=device, dtype=dtype)
     dist.broadcast(dout, src=0)
 
-    local_qkv = qkv.chunk(world_size, dim=-3)[local_rank]
-    local_dout = dout.chunk(world_size, dim=-3)[local_rank].clone().detach()
+    local_qkv = qkv.chunk(world_size, dim=-2)[local_rank]
+    local_dout = dout.chunk(world_size, dim=-2)[local_rank].clone().detach()
 
     local_q = local_qkv[0].clone().detach().requires_grad_(True)
     local_k = local_qkv[1].clone().detach().requires_grad_(True)
     local_v = local_qkv[2].clone().detach().requires_grad_(True)
 
-    local_out, local_lse = ring_flash_attn(q=local_q, k=local_k, v=local_v, causal=True)
+    scale = d ** (-0.5)
+    block_mask = create_block_mask(causal_mask, None, None, local_q.shape[-2], local_q.shape[-2], device = local_rank)
+    local_out, local_lse = ring_flex_attn(q=local_q, k=local_k, v=local_v, causal=True, _compile=True)
     local_out.backward(local_dout)
 
 if __name__ == "__main__":
@@ -76,9 +80,11 @@ if __name__ == "__main__":
 """
 torchrun \
 --nproc_per_node 4 \
-benchmark/test_ring_fa2_fwd_bwd.py
+benchmark/test_ring_flex_fwd_bwd.py
 
-Average step time: 0.0044 sec
+Average step time: 0.3046 sec
+Throughput: 134489.05 tokens/sec
+TFLOPs/sec: 135.38
 """
 
 """

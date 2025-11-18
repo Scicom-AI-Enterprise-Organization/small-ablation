@@ -10,7 +10,7 @@ import torch.distributed as dist
 import time
 
 batch_size = 1
-seqlen = 10240
+seqlen = 40960
 nheads = 16
 d = 128
 
@@ -78,7 +78,9 @@ torchrun \
 --nproc_per_node 4 \
 benchmark/test_ring_fa3_fwd_bwd.py
 
-Average step time: 0.0037 sec
+Average step time: 0.0247 sec
+Throughput: 1659137.32 tokens/sec
+TFLOPs/sec: 1670.14
 """
 
 """
