@@ -153,6 +153,7 @@ if step == 1
 
     send dk, dv to send # dk, dv from ∂(q1, k1, v1)
     receive dk1, dv1 from receive # dk, dv from ∂(q1, k0, v0) + ∂(q0, k0, v0)
+    # dk1, dv1 is your final local dk, dv, ∂(q1, k0, v0) + ∂(q0, k0, v0) done in device 1
 ```
 
 - For GPU 1, attention calculated as q1k0v0 + q1k1v1,
@@ -215,6 +216,8 @@ if step == 1
 
     send dk, dv to send # dk, dv from ∂(q1, k0, v0) + ∂(q0, k0, v0)
     receive dk0, dv0 from receive # dk, dv from ∂(q1, k1, v1)
+    # dk0, dv0 is your final local dk, dv, ∂(q1, k1, v1) done in device 0
+    # we are not required to do ∂(q0, k1, v1) because empty masking
 ```
 
 Voila!
