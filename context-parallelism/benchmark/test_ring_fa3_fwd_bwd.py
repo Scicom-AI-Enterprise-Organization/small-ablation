@@ -5,19 +5,18 @@ parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
 
 from ring_fa3 import ring_flash_attn
-from flash_attn import flash_attn_func
 import torch
 import torch.distributed as dist
 import time
 
+batch_size = 1
+seqlen = 10240
+nheads = 16
+d = 128
+
 def run():
     world_size = int(os.environ['LOCAL_WORLD_SIZE'])
     local_rank = int(os.environ['LOCAL_RANK'])
-
-    batch_size = 1
-    seqlen = 8192
-    nheads = 16
-    d = 128
 
     device = torch.device(f'cuda:{local_rank}')
     dtype = torch.bfloat16
@@ -64,8 +63,13 @@ if __name__ == "__main__":
 
     end = time.time()
     avg_time = (end - start) / repeat
+    flops_per_step = 12 * batch_size * nheads * (seqlen ** 2) * d
+    tflops = (flops_per_step / avg_time) / 1e12
+    throughput = seqlen / avg_time
     if local_rank == 0:
         print(f"Average step time: {avg_time:.4f} sec")
+        print(f"Throughput: {throughput:.2f} tokens/sec")
+        print(f"TFLOPs/sec: {tflops:.2f}")
 
     dist.destroy_process_group()
 

@@ -4,7 +4,7 @@ import os
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
 
-from ring_fa2 import ring_flash_attn
+from torch.nn.attention.flex_attention import flex_attention, create_block_mask
 import torch
 import torch.distributed as dist
 import time
