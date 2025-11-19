@@ -91,173 +91,173 @@ torchrun \
 benchmark/fa3_v2_plot.py
 
 seqlen: 1024
-Average step time: 0.0036 sec
-Throughput: 281054.82 tokens/sec
-TFLOPs/sec: 7.07
+Average step time: 0.0031 sec
+Throughput: 331039.08 tokens/sec
+TFLOPs/sec: 8.33
 seqlen: 2048
 Average step time: 0.0036 sec
-Throughput: 572219.79 tokens/sec
-TFLOPs/sec: 28.80
+Throughput: 567554.32 tokens/sec
+TFLOPs/sec: 28.57
 seqlen: 4096
-Average step time: 0.0047 sec
-Throughput: 880477.10 tokens/sec
-TFLOPs/sec: 88.63
+Average step time: 0.0044 sec
+Throughput: 936049.01 tokens/sec
+TFLOPs/sec: 94.23
 seqlen: 8192
-Average step time: 0.0039 sec
-Throughput: 2115382.72 tokens/sec
-TFLOPs/sec: 425.88
+Average step time: 0.0044 sec
+Throughput: 1855457.79 tokens/sec
+TFLOPs/sec: 373.55
 seqlen: 16384
-Average step time: 0.0059 sec
-Throughput: 2786022.62 tokens/sec
-TFLOPs/sec: 1121.80
+Average step time: 0.0063 sec
+Throughput: 2614697.39 tokens/sec
+TFLOPs/sec: 1052.82
 seqlen: 32768
 Average step time: 0.0156 sec
-Throughput: 2104202.83 tokens/sec
-TFLOPs/sec: 1694.53
+Throughput: 2102329.55 tokens/sec
+TFLOPs/sec: 1693.02
 seqlen: 40960
-Average step time: 0.0230 sec
-Throughput: 1780769.74 tokens/sec
-TFLOPs/sec: 1792.58
+Average step time: 0.0222 sec
+Throughput: 1841207.92 tokens/sec
+TFLOPs/sec: 1853.42
 seqlen: 51200
-Average step time: 0.0344 sec
-Throughput: 1488960.91 tokens/sec
-TFLOPs/sec: 1873.55
+Average step time: 0.0338 sec
+Throughput: 1514791.57 tokens/sec
+TFLOPs/sec: 1906.05
 seqlen: 61440
-Average step time: 0.0489 sec
-Throughput: 1256899.28 tokens/sec
-TFLOPs/sec: 1897.85
+Average step time: 0.0468 sec
+Throughput: 1311715.42 tokens/sec
+TFLOPs/sec: 1980.62
 seqlen: 71680
-Average step time: 0.0632 sec
-Throughput: 1133979.63 tokens/sec
-TFLOPs/sec: 1997.63
+Average step time: 0.0620 sec
+Throughput: 1155816.34 tokens/sec
+TFLOPs/sec: 2036.09
 seqlen: 81920
-Average step time: 0.0802 sec
-Throughput: 1021790.79 tokens/sec
-TFLOPs/sec: 2057.14
+Average step time: 0.0790 sec
+Throughput: 1036923.27 tokens/sec
+TFLOPs/sec: 2087.60
 seqlen: 92160
-Average step time: 0.0997 sec
-Throughput: 924379.11 tokens/sec
-TFLOPs/sec: 2093.65
+Average step time: 0.0991 sec
+Throughput: 929683.72 tokens/sec
+TFLOPs/sec: 2105.66
 seqlen: 102400
-Average step time: 0.1232 sec
-Throughput: 831377.75 tokens/sec
-TFLOPs/sec: 2092.23
+Average step time: 0.1206 sec
+Throughput: 848963.80 tokens/sec
+TFLOPs/sec: 2136.49
 seqlen: 112640
-Average step time: 0.1467 sec
-Throughput: 768000.73 tokens/sec
-TFLOPs/sec: 2126.01
+Average step time: 0.1437 sec
+Throughput: 783753.42 tokens/sec
+TFLOPs/sec: 2169.62
 seqlen: 122880
-Average step time: 0.1763 sec
-Throughput: 697094.44 tokens/sec
-TFLOPs/sec: 2105.15
+Average step time: 0.1742 sec
+Throughput: 705332.15 tokens/sec
+TFLOPs/sec: 2130.03
 seqlen: 133120
-Average step time: 0.2006 sec
-Throughput: 663578.24 tokens/sec
-TFLOPs/sec: 2170.93
+Average step time: 0.1935 sec
+Throughput: 688046.34 tokens/sec
+TFLOPs/sec: 2250.98
 seqlen: 143360
-Average step time: 0.2303 sec
-Throughput: 622610.23 tokens/sec
-TFLOPs/sec: 2193.59
+Average step time: 0.2312 sec
+Throughput: 620010.69 tokens/sec
+TFLOPs/sec: 2184.43
 seqlen: 153600
-Average step time: 0.2653 sec
-Throughput: 578945.38 tokens/sec
-TFLOPs/sec: 2185.45
+Average step time: 0.2605 sec
+Throughput: 589559.99 tokens/sec
+TFLOPs/sec: 2225.51
 seqlen: 163840
-Average step time: 0.2976 sec
-Throughput: 550625.54 tokens/sec
-TFLOPs/sec: 2217.11
+Average step time: 0.2925 sec
+Throughput: 560138.09 tokens/sec
+TFLOPs/sec: 2255.41
 seqlen: 174080
-Average step time: 0.3380 sec
-Throughput: 515023.83 tokens/sec
-TFLOPs/sec: 2203.37
+Average step time: 0.3317 sec
+Throughput: 524775.30 tokens/sec
+TFLOPs/sec: 2245.09
 seqlen: 184320
-Average step time: 0.3750 sec
-Throughput: 491505.94 tokens/sec
-TFLOPs/sec: 2226.45
+Average step time: 0.3652 sec
+Throughput: 504749.10 tokens/sec
+TFLOPs/sec: 2286.44
 seqlen: 194560
-Average step time: 0.4171 sec
-Throughput: 466409.03 tokens/sec
-TFLOPs/sec: 2230.14
+Average step time: 0.4079 sec
+Throughput: 477027.05 tokens/sec
+TFLOPs/sec: 2280.91
 seqlen: 204800
-Average step time: 0.4583 sec
-Throughput: 446825.28 tokens/sec
-TFLOPs/sec: 2248.95
+Average step time: 0.4543 sec
+Throughput: 450758.80 tokens/sec
+TFLOPs/sec: 2268.74
 seqlen: 215040
-Average step time: 0.5218 sec
-Throughput: 412143.68 tokens/sec
-TFLOPs/sec: 2178.11
+Average step time: 0.5056 sec
+Throughput: 425354.02 tokens/sec
+TFLOPs/sec: 2247.92
 seqlen: 225280
-Average step time: 0.5573 sec
-Throughput: 404267.01 tokens/sec
-TFLOPs/sec: 2238.22
+Average step time: 0.5469 sec
+Throughput: 411931.70 tokens/sec
+TFLOPs/sec: 2280.65
 seqlen: 235520
-Average step time: 0.6009 sec
-Throughput: 391936.13 tokens/sec
-TFLOPs/sec: 2268.58
+Average step time: 0.6061 sec
+Throughput: 388596.63 tokens/sec
+TFLOPs/sec: 2249.25
 seqlen: 245760
-Average step time: 0.6680 sec
-Throughput: 367902.86 tokens/sec
-TFLOPs/sec: 2222.06
+Average step time: 0.6546 sec
+Throughput: 375444.71 tokens/sec
+TFLOPs/sec: 2267.61
 seqlen: 256000
-Average step time: 0.7183 sec
-Throughput: 356397.80 tokens/sec
-TFLOPs/sec: 2242.26
+Average step time: 0.7111 sec
+Throughput: 359997.75 tokens/sec
+TFLOPs/sec: 2264.91
 seqlen: 266240
-Average step time: 0.7646 sec
-Throughput: 348210.80 tokens/sec
-TFLOPs/sec: 2278.38
+Average step time: 0.7634 sec
+Throughput: 348754.49 tokens/sec
+TFLOPs/sec: 2281.94
 seqlen: 276480
-Average step time: 0.8353 sec
-Throughput: 331006.22 tokens/sec
-TFLOPs/sec: 2249.11
+Average step time: 0.8354 sec
+Throughput: 330969.23 tokens/sec
+TFLOPs/sec: 2248.86
 seqlen: 286720
-Average step time: 0.9002 sec
-Throughput: 318520.67 tokens/sec
-TFLOPs/sec: 2244.43
+Average step time: 0.8748 sec
+Throughput: 327763.57 tokens/sec
+TFLOPs/sec: 2309.56
 seqlen: 296960
-Average step time: 0.9803 sec
-Throughput: 302922.28 tokens/sec
-TFLOPs/sec: 2210.75
+Average step time: 0.9512 sec
+Throughput: 312202.37 tokens/sec
+TFLOPs/sec: 2278.48
 seqlen: 307200
-Average step time: 1.0040 sec
-Throughput: 305961.87 tokens/sec
-TFLOPs/sec: 2309.93
+Average step time: 1.0302 sec
+Throughput: 298192.84 tokens/sec
+TFLOPs/sec: 2251.28
 seqlen: 317440
-Average step time: 1.1043 sec
-Throughput: 287450.16 tokens/sec
-TFLOPs/sec: 2242.52
+Average step time: 1.0902 sec
+Throughput: 291182.05 tokens/sec
+TFLOPs/sec: 2271.63
 seqlen: 327680
-Average step time: 1.1824 sec
-Throughput: 277122.51 tokens/sec
-TFLOPs/sec: 2231.69
+Average step time: 1.1415 sec
+Throughput: 287059.83 tokens/sec
+TFLOPs/sec: 2311.71
 seqlen: 337920
-Average step time: 1.2326 sec
-Throughput: 274148.56 tokens/sec
-TFLOPs/sec: 2276.73
+Average step time: 1.2478 sec
+Throughput: 270803.22 tokens/sec
+TFLOPs/sec: 2248.95
 seqlen: 348160
-Average step time: 1.3257 sec
-Throughput: 262626.78 tokens/sec
-TFLOPs/sec: 2247.13
+Average step time: 1.3093 sec
+Throughput: 265922.03 tokens/sec
+TFLOPs/sec: 2275.33
 seqlen: 358400
-Average step time: 1.3857 sec
-Throughput: 258632.63 tokens/sec
-TFLOPs/sec: 2278.05
+Average step time: 1.3768 sec
+Throughput: 260313.65 tokens/sec
+TFLOPs/sec: 2292.85
 seqlen: 368640
-Average step time: 1.4896 sec
-Throughput: 247469.07 tokens/sec
-TFLOPs/sec: 2241.99
+Average step time: 1.4688 sec
+Throughput: 250976.62 tokens/sec
+TFLOPs/sec: 2273.77
 seqlen: 378880
-Average step time: 1.5489 sec
-Throughput: 244612.82 tokens/sec
-TFLOPs/sec: 2277.68
+Average step time: 1.5359 sec
+Throughput: 246688.77 tokens/sec
+TFLOPs/sec: 2297.01
 seqlen: 389120
-Average step time: 1.6637 sec
-Throughput: 233882.91 tokens/sec
-TFLOPs/sec: 2236.63
+Average step time: 1.6217 sec
+Throughput: 239952.90 tokens/sec
+TFLOPs/sec: 2294.67
 seqlen: 399360
-Average step time: 1.7257 sec
-Throughput: 231425.48 tokens/sec
-TFLOPs/sec: 2271.37
+Average step time: 1.6966 sec
+Throughput: 235383.38 tokens/sec
+TFLOPs/sec: 2310.21
 """
 
 """

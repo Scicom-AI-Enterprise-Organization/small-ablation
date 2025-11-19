@@ -11,7 +11,7 @@ os.environ['NCCL_P2P_LEVEL']='NVL,PIX'
 
 import torch
 from flash_attn_interface import _flash_attn_forward, _flash_attn_backward
-from utils import merge_attention, RingComm
+from utils import merge_attention
 from utils_v2 import RingComm
 
 def _forward(
@@ -87,11 +87,9 @@ def _backward(
     scale: float,
     causal: bool = True,
 ):
-    kv_comm_stream = torch.cuda.current_stream(device=q.device)
-    d_kv_comm_stream = torch.cuda.current_stream(device=q.device)
-
-    kv_comm = RingComm(process_group, stream=kv_comm_stream)
-    d_kv_comm = RingComm(process_group, stream=d_kv_comm_stream)
+    comm_stream = torch.cuda.current_stream(device=q.device)
+    kv_comm = RingComm(process_group, stream=comm_stream)
+    d_kv_comm = RingComm(process_group, stream=comm_stream)
 
     dq, dk, dv = None, None, None
 
