@@ -4,83 +4,131 @@ import os
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
 
-from ring_fa2 import ring_flash_attn
+from ring_flex import ring_flex_attn
+from torch.nn.attention.flex_attention import create_block_mask
+from utils import causal_mask
 import torch
 import torch.distributed as dist
 import time
 
 batch_size = 1
-seqlen = 40960
 nheads = 16
 d = 128
 
-def run():
+def create(seqlen):
     world_size = int(os.environ['LOCAL_WORLD_SIZE'])
     local_rank = int(os.environ['LOCAL_RANK'])
 
     device = torch.device(f'cuda:{local_rank}')
     dtype = torch.bfloat16
 
-    assert seqlen % world_size == 0
-    assert d % 8 == 0
-
     qkv = torch.randn(
-        3, batch_size, seqlen, nheads, d, device=device, dtype=dtype, requires_grad=True,
+        3, batch_size, nheads, seqlen, d, device=device, dtype=dtype, requires_grad=True,
     )
     dist.broadcast(qkv, src=0)
 
-    dout = torch.randn(batch_size, seqlen, nheads, d, device=device, dtype=dtype)
+    dout = torch.randn(batch_size, nheads, seqlen, d, device=device, dtype=dtype)
     dist.broadcast(dout, src=0)
 
-    local_qkv = qkv.chunk(world_size, dim=-3)[local_rank]
-    local_dout = dout.chunk(world_size, dim=-3)[local_rank].clone().detach()
+    local_qkv = qkv.chunk(world_size, dim=-2)[local_rank]
+    local_dout = dout.chunk(world_size, dim=-2)[local_rank].clone().detach()
+
+    del qkv, dout
+    torch.cuda.empty_cache()
+
+    return local_qkv, local_dout
+
+def run(local_qkv, local_dout):
 
     local_q = local_qkv[0].clone().detach().requires_grad_(True)
     local_k = local_qkv[1].clone().detach().requires_grad_(True)
     local_v = local_qkv[2].clone().detach().requires_grad_(True)
 
-    local_out, local_lse = ring_flash_attn(q=local_q, k=local_k, v=local_v, causal=True)
+    scale = d ** (-0.5)
+    block_mask = create_block_mask(causal_mask, None, None, local_q.shape[-2], local_q.shape[-2], device = local_rank)
+    local_out, local_lse = ring_flex_attn(q=local_q, k=local_k, v=local_v, causal=True, _compile=True)
     local_out.backward(local_dout)
 
 if __name__ == "__main__":
     dist.init_process_group(backend='nccl')
     local_rank = int(os.environ['LOCAL_RANK'])
-    
+
+    seqlens = [1024, 2048, 4096, 8192, 16384, 32768] + [10240 * i for i in range(4, 40, 1)]
     warmup = 3
-    repeat = 10
-    for _ in range(warmup):
-        run()
-        torch.cuda.synchronize()
-        dist.barrier()
+    repeat = 5
+
+    for seqlen in seqlens:
+        try:
+            local_qkv, local_dout = create(seqlen)
+        
+            for _ in range(warmup):
+                run(local_qkv, local_dout)
+                torch.cuda.synchronize()
+                dist.barrier()
+            
+            torch.cuda.synchronize()
+            dist.barrier()
+            start = time.time()
+            for _ in range(repeat):
+                run(local_qkv, local_dout)
+                torch.cuda.synchronize()
+                dist.barrier()
+        
+            end = time.time()
+            avg_time = (end - start) / repeat
+            flops_per_step = 12 * batch_size * nheads * (seqlen ** 2) * d
+            tflops = (flops_per_step / avg_time) / 1e12
+            throughput = seqlen / avg_time
+            if local_rank == 0:
+                print(f"seqlen: {seqlen}")
+                print(f"Average step time: {avg_time:.4f} sec")
+                print(f"Throughput: {throughput:.2f} tokens/sec")
+                print(f"TFLOPs/sec: {tflops:.2f}")
+            
+            del local_qkv, local_dout
+            torch.cuda.empty_cache()
+        except Exception as e:
+            print(e)
     
-    torch.cuda.synchronize()
-    dist.barrier()
-    start = time.time()
-    for _ in range(repeat):
-        run()
-        torch.cuda.synchronize()
-        dist.barrier()
-
-    end = time.time()
-    avg_time = (end - start) / repeat
-    flops_per_step = 12 * batch_size * nheads * (seqlen ** 2) * d
-    tflops = (flops_per_step / avg_time) / 1e12
-    throughput = seqlen / avg_time
-    if local_rank == 0:
-        print(f"Average step time: {avg_time:.4f} sec")
-        print(f"Throughput: {throughput:.2f} tokens/sec")
-        print(f"TFLOPs/sec: {tflops:.2f}")
-
     dist.destroy_process_group()
 
 """
 torchrun \
 --nproc_per_node 4 \
-benchmark/test_ring_fa2_fwd_bwd.py
+benchmark/fa2_plot.py
 
-Average step time: 0.0388 sec
-Throughput: 1055599.37 tokens/sec
-TFLOPs/sec: 1062.60
+seqlen: 1024
+Average step time: 0.0321 sec
+Throughput: 31949.76 tokens/sec
+TFLOPs/sec: 0.80
+seqlen: 2048
+Average step time: 0.0349 sec
+Throughput: 58753.56 tokens/sec
+TFLOPs/sec: 2.96
+seqlen: 4096
+Average step time: 0.0323 sec
+Throughput: 126675.40 tokens/sec
+TFLOPs/sec: 12.75
+seqlen: 8192
+Average step time: 0.0381 sec
+Throughput: 215161.47 tokens/sec
+TFLOPs/sec: 43.32
+seqlen: 16384
+Average step time: 0.0706 sec
+Throughput: 232198.05 tokens/sec
+TFLOPs/sec: 93.50
+seqlen: 32768
+Average step time: 0.1967 sec
+Throughput: 166588.43 tokens/sec
+TFLOPs/sec: 134.15
+seqlen: 40960
+Average step time: 0.3026 sec
+Throughput: 135380.95 tokens/sec
+TFLOPs/sec: 136.28
+seqlen: 51200
+Average step time: 0.4656 sec
+Throughput: 109959.00 tokens/sec
+TFLOPs/sec: 138.36
 """
 
 """

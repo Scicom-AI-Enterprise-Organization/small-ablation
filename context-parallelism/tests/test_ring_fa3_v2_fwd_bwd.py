@@ -61,5 +61,5 @@ if __name__ == "__main__":
 """
 torchrun \
 --nproc_per_node 4 \
-tests/test_ring_fa3_fwd_bwd.py
+tests/test_ring_fa3_v2_fwd_bwd.py
 """

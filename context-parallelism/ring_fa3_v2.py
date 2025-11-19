@@ -1,0 +1,205 @@
+"""
+Heavily borrow from https://github.com/zhuzilin/ring-flash-attention/blob/main/ring_flash_attn/ring_flash_attn.py
+But follow api from https://github.com/Dao-AILab/flash-attention/blob/main/hopper/flash_attn_interface.py
+"""
+
+import os
+os.environ['NCCL_ASYNC_ERROR_HANDLING']='1'
+os.environ['NCCL_SHM_DISABLE']='1'      
+os.environ['NCCL_P2P_DISABLE']='0'
+os.environ['NCCL_P2P_LEVEL']='NVL,PIX'
+
+import torch
+from flash_attn_interface import _flash_attn_forward, _flash_attn_backward
+from utils import merge_attention, RingComm
+from utils_v2 import RingComm
+
+def _forward(
+    process_group,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    scale: float,
+    causal: bool = True,
+):
+    """
+    q: [B, L, H, D]
+    k: [B, L, H, D]
+    v: [B, L, H, D]
+    """
+    comm_stream = torch.cuda.current_stream(device=q.device)
+
+    comm = RingComm(process_group, stream=comm_stream)
+
+    out = None
+    lse = None
+    next_k, next_v = None, None
+
+    for step in range(comm.world_size):
+        if step + 1 != comm.world_size:
+            next_k, next_v = comm.send_recv_kv(k, v)
+
+        if not causal or step <= comm.rank:
+            with torch.no_grad():
+                fwd_causal = causal and step == 0
+
+                out_, softmax_lse, *rest = _flash_attn_forward(
+                    q,
+                    k,
+                    v,
+                    None, None,  # k_new, v_new
+                    None,  # qv
+                    None,  # out
+                    None, None, None,   # cu_seqlens_q/k/k_new
+                    None, None,   # seqused_q/k
+                    None, None,   # max_seqlen_q/k
+                    None, None, None,   # page_table, kv_batch_idx, leftpad_k,
+                    None, None, None,  # rotary_cos/sin, seqlens_rotary
+                    None, None, None,
+                    scale,
+                    causal=fwd_causal,
+                    window_size=(-1, -1),
+                    attention_chunk=0,
+                    softcap=0.0,
+                    sm_margin=0,
+                )
+                block_out, block_lse = out_, softmax_lse
+                
+                block_lse = block_lse.transpose(1, 2)
+                out, lse = merge_attention(out, lse, block_out, block_lse)
+                out = out.to(q.dtype)
+        
+        if step + 1 != comm.world_size:
+            comm.wait()
+            k, v = next_k, next_v
+    
+    return out, lse
+
+def _backward(
+    process_group,
+    dout: torch.Tensor,
+    dlse: torch.Tensor,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    out: torch.Tensor,
+    lse: torch.Tensor,
+    scale: float,
+    causal: bool = True,
+):
+    kv_comm_stream = torch.cuda.current_stream(device=q.device)
+    d_kv_comm_stream = torch.cuda.current_stream(device=q.device)
+
+    kv_comm = RingComm(process_group, stream=kv_comm_stream)
+    d_kv_comm = RingComm(process_group, stream=d_kv_comm_stream)
+
+    dq, dk, dv = None, None, None
+
+    block_dq_buffer = torch.empty(q.shape, dtype=q.dtype, device=q.device)
+    block_dk_buffer = torch.empty(k.shape, dtype=k.dtype, device=k.device)
+    block_dv_buffer = torch.empty(v.shape, dtype=v.dtype, device=v.device)
+
+    next_dk, next_dv = None, None
+    next_k, next_v = None, None
+
+    for step in range(kv_comm.world_size):
+        if step + 1 != kv_comm.world_size:
+            next_k, next_v = kv_comm.send_recv_kv(k, v)
+
+        if not causal or step <= kv_comm.rank:
+            bwd_causal = causal and step == 0
+
+            _flash_attn_backward(
+                dout,
+                q,
+                k,
+                v,
+                out,
+                lse,
+                None, None, # cu_seqlens_q, cu_seqlens_k,
+                None, None, # sequed_q, sequed_k,
+                None, None, # max_seqlen_q, max_seqlen_k,
+                block_dq_buffer,
+                block_dk_buffer,
+                block_dv_buffer,
+                scale,
+                bwd_causal,
+                (-1,-1),
+                0,
+                False,
+                0,
+            )
+
+            if dq is None:
+                dq = block_dq_buffer.to(torch.float32)
+                dk = block_dk_buffer.to(torch.float32)
+                dv = block_dv_buffer.to(torch.float32)
+            else:
+                dq += block_dq_buffer
+                d_kv_comm.wait()
+                dk = block_dk_buffer + next_dk
+                dv = block_dv_buffer + next_dv
+        
+        elif step != 0:
+            d_kv_comm.wait()
+            dk, dv = next_dk, next_dv
+
+        if step + 1 != kv_comm.world_size:
+            kv_comm.wait()
+            k, v = next_k, next_v
+        
+        next_dk, next_dv = d_kv_comm.send_recv_kv(dk, dv)
+    
+    d_kv_comm.wait()
+    
+    return dq.to(q.dtype), next_dk.to(q.dtype), next_dv.to(q.dtype)
+
+class RingFlashAttnFunc(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        q,
+        k,
+        v,
+        scale,
+        causal,
+        group,
+    ):
+        if scale is None:
+            scale = q.shape[-1] ** (-0.5)
+
+        k = k.contiguous()
+        v = v.contiguous()
+        out, lse = _forward(group, q, k, v, scale=scale)
+        ctx.save_for_backward(q, k, v, out, lse)
+        ctx.scale = scale
+        ctx.causal = causal
+        ctx.group = group
+        return out, lse
+
+    @staticmethod
+    def backward(ctx, dout, dlse, *args):
+        q, k, v, out, lse = ctx.saved_tensors
+        dq, dk, dv = _backward(
+            ctx.group,
+            dout,
+            dlse,
+            q,
+            k,
+            v,
+            out,
+            lse,
+            scale=ctx.scale,
+            causal=ctx.causal,
+        )
+        return dq, dk, dv, None, None, None, None
+
+def ring_flash_attn(
+    q,
+    k,
+    v,
+    scale=None,
+    causal=False,
+    group=None,
+):
+    return RingFlashAttnFunc.apply(q, k, v, scale, causal, group)
