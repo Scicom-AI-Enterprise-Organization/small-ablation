@@ -24,6 +24,6 @@ bash liger-bf16.sh
 
 ## WanDB
 
-We also recorded MFU and Throughput per second, WanDB project at https://wandb.ai/aies-scicom-scicom-ai/small-malaysian-lm
+We also recorded MFU and Throughput per second, WanDB project at https://wandb.ai/aies-scicom-scicom-ai/liger-vs-cce
 
 <img src="wandb.png" width="50%">
