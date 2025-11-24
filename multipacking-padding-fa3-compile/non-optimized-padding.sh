@@ -6,14 +6,14 @@ TORCH_LOGS=recompiles \
 CUDA_VISIBLE_DEVICES="0" \
 python3 train.py \
 --model_name_or_path "Qwen/Qwen3-0.6B-Base" \
---per_device_train_batch_size 2 \
---gradient_accumulation_steps 4 \
+--per_device_train_batch_size 32 \
+--gradient_accumulation_steps 1 \
 --bf16 \
 --train_file "multipacking" \
 --logging_steps 1 \
 --learning_rate 2e-5 \
 --warmup_steps 100 \
---max_steps 1000 \
+--max_steps 300 \
 --block_size 10240 \
 --gradient_checkpointing true \
 --dataloader_num_workers 10 \

@@ -23,3 +23,9 @@ Optimized,
 ```bash
 HF_HUB_ENABLE_HF_TRANSFER=0 hf download Scicom-intl/multipacking-multilingual-tts-10k-qwen3-optimized --repo-type=dataset --local-dir=./multipacking-optimized
 ```
+
+## What we learnt
+
+Never ever try to include liger loss for torch compile,
+
+<img src="memory-peak.png" width="50%">
