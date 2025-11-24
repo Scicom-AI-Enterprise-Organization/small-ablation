@@ -26,6 +26,8 @@ HF_HUB_ENABLE_HF_TRANSFER=0 hf download Scicom-intl/multipacking-multilingual-tt
 
 ## What we learnt
 
-Never ever try to include liger loss for torch compile,
+Default Liger can cause memory explode due to loop,
 
 <img src="memory-peak.png" width="50%">
+
+We patched it at https://github.com/Scicom-AI-Enterprise-Organization/Liger-Kernel-remove-item
