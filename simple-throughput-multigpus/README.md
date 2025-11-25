@@ -1,4 +1,4 @@
-# TM Benchmark Training
+# Simple throughput training Multi-GPUs
 
 Benchmark simple LLM training based on Qwen3-0.6B-Base.
 
