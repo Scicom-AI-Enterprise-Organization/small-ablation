@@ -1,0 +1,11 @@
+accelerate
+bitsandbytes
+datasets
+huggingface-hub
+peft
+safetensors
+torch
+tqdm
+transformers
+triton
+trl
