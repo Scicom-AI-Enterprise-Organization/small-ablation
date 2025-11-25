@@ -19,37 +19,53 @@ Fine-tuning the library models for causal language modeling (GPT, GPT-2, CTRL, .
 Here is the full list of checkpoints on the hub that can be fine-tuned by this script:
 https://huggingface.co/models?filter=text-generation
 """
-# You can also adapt this script on your own causal language modeling
-# task. Pointers for this are left as comments.
 
 import torch
+from torch import nn
+import torch.nn.functional as F
+import torch.nn.init as init
+import torch.distributed as dist
 
 import logging
 import os
 import sys
-import warnings
+import wandb
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
 import transformers
-import random
 from transformers import (
+    AutoTokenizer,
+    AddedToken,
     HfArgumentParser,
     Trainer,
     TrainingArguments,
     set_seed,
 )
-from transformers.trainer_utils import get_last_checkpoint
 from transformers import Qwen3ForCausalLM
+from transformers import TrainerCallback, TrainerState, TrainerControl
+import streaming
+import json
 import numpy as np
 from streaming import LocalDataset
 from streaming.base.format.mds.encodings import Encoding, _encodings
-from cut_cross_entropy import linear_cross_entropy
+from liger_kernel.transformers import apply_liger_kernel_to_qwen3, LigerFusedLinearCrossEntropyLoss
+
+apply_liger_kernel_to_qwen3(
+    rope=True,
+    swiglu=True,
+    rms_norm=True,
+    cross_entropy=False,
+    fused_linear_cross_entropy=False,
+)
 
 torch.serialization.add_safe_globals([np.core.multiarray._reconstruct])
 
 logger = logging.getLogger(__name__)
 
+def is_rank_0():
+    return (not dist.is_available()) or (not dist.is_initialized()) or dist.get_rank() == 0
 
 @dataclass
 class ModelArguments:
@@ -65,19 +81,8 @@ class ModelArguments:
             )
         },
     )
-    torch_dtype: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": (
-                "Override the default `torch.dtype` and load the model under this dtype. If `auto` is passed, the "
-                "dtype will be automatically derived from the model's weights."),
-            "choices": [
-                "auto",
-                "bfloat16",
-                "float16",
-                "float32"],
-        },
-    )
+    model_dtype: str = field(default="float32", metadata={"help": "model dtype"}, )
+    attn_implementation: str = field(default="flash_attention_2", metadata={"help": "attention implementation"}, )
 
 
 @dataclass
@@ -89,14 +94,25 @@ class DataTrainingArguments:
     train_file: Optional[str] = field(
         default=None, metadata={
             "help": "The input training data file (a text file)."})
+    block_size: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Optional input sequence length after tokenization. "
+                "The training dataset will be truncated in block of this size for training. "
+                "Default to the model max input length for single sentence inputs (take into account special tokens)."
+            )
+        },
+    )
 
 class Model(Qwen3ForCausalLM):
     def __init__(self, config):
         super().__init__(config)
+        self.loss = LigerFusedLinearCrossEntropyLoss(reduction="sum")
         
     def forward(self, input_ids, attention_mask=None, position_ids=None, labels=None, num_items_in_batch=None, **kwargs):
         super_out = self.model.forward(
-            input_ids = input_ids, 
+            input_ids = input_ids,
             position_ids = position_ids, 
             attention_mask = attention_mask, 
             output_hidden_states = True,
@@ -104,21 +120,36 @@ class Model(Qwen3ForCausalLM):
         )
         if labels is not None:
             embeddings = super_out.last_hidden_state
-            reduction = "sum" if num_items_in_batch is not None else "mean"
-            loss = linear_cross_entropy(
-                embeddings, 
-                self.lm_head.weight, 
-                labels, 
-                shift=True,
-                impl="cce_kahan_full_c",
-                reduction=reduction,
-            )
-            if reduction == "sum":
-                if torch.is_tensor(num_items_in_batch):
-                    num_items_in_batch = num_items_in_batch.to(loss.device)
-                loss = loss / num_items_in_batch
+            embeddings = embeddings[:,:-1].reshape(-1, embeddings.shape[-1])
+            labels = labels[..., 1:].contiguous()
+            labels = labels.reshape(-1)
+            loss = self.loss(self.lm_head.weight, embeddings, labels)
+            num_items_in_batch = num_items_in_batch.to(loss.device)
+            loss = loss / num_items_in_batch
             return {'loss': loss}
         return super_out
+
+class WandbMFUCallback(TrainerCallback):
+    def __init__(self):
+        self.previous = 0
+        self.begin_step = None
+        self.end_step = None
+
+    def on_step_begin(self, args, state: TrainerState, control: TrainerControl, **kwargs):
+        self.begin_step = time.time()
+
+    def on_step_end(self, args, state: TrainerState, control: TrainerControl, **kwargs):
+        self.end_step = time.time()
+    
+    def on_log(self, args, state: TrainerState, control: TrainerControl, **kwargs):
+        dt = self.end_step - self.begin_step
+        throughput_per_sec = (state.num_input_tokens_seen - self.previous) / dt
+        if is_rank_0():
+            wandb.log({
+                "train_throughput_per_sec": throughput_per_sec,
+            }, step=state.global_step)
+        self.previous = state.num_input_tokens_seen
+
 
 def main():
 
@@ -150,6 +181,8 @@ def main():
     logger.info(f"Training/evaluation parameters {training_args}")
 
     set_seed(training_args.seed)
+    
+    sequence_length = data_args.block_size
 
     class UInt32(Encoding):
         def encode(self, obj) -> bytes:
@@ -170,6 +203,9 @@ def main():
             data.pop('text', None)
             data.pop('token_type_ids', None)
 
+            if data['attention_mask'].max() > sequence_length:
+                return
+
             for k in data.keys():
                 data[k] = data[k].astype(np.int64)
         
@@ -178,12 +214,16 @@ def main():
         def __len__(self):
             return len(self.dataset)
 
+
     model = Model.from_pretrained(
         model_args.model_name_or_path,
-        attn_implementation = 'flash_attention_2',
-        torch_dtype=model_args.torch_dtype
+        attn_implementation = model_args.attn_implementation,
+        torch_dtype = model_args.model_dtype,
     )
+    print(model)
+
     dataset = DatasetFixed(data_args.train_file)
+    print('dataset', len(dataset), dataset[0]['attention_mask'].shape)
 
     def collator(batch):
         batch = [b for b in batch if b is not None]
@@ -218,13 +258,14 @@ def main():
         data_collator=collator,
         compute_metrics=None,
         preprocess_logits_for_metrics=None,
+        callbacks=[WandbMFUCallback()],
     )
-
     trainer.train()
 
 
 def _mp_fn(index):
     main()
+
 
 if __name__ == "__main__":
     main()
