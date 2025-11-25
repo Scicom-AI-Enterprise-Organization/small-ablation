@@ -12,7 +12,7 @@ python3 train.py \
 --logging_steps 1 \
 --learning_rate 2e-5 \
 --warmup_steps 100 \
---max_steps 3 \
+--max_steps 2 \
 --block_size 10240 \
 --gradient_checkpointing true \
 --dataloader_num_workers 10 \
