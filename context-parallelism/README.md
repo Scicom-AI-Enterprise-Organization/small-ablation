@@ -260,3 +260,7 @@ Voila!
 ```
 
 You can see higher ranks use more computation.
+
+### ZigZag Ring Attention
+
+Solved this unbalanced computation using zigzag distribution.
