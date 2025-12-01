@@ -19,3 +19,11 @@ Average memory requirement for 10k sequence dimension is 44.6GB
 We chunk the tensor on sequence dimenstion, for each chunk do matmul with weight after calculate chunk sum logprob and add in global sum logprob.
 
 Average memory requirement for 10k sequence dimension is 31.9GB
+
+### Proper Pytorch chunking
+
+<img src="chunk-pytorch-memory-v2.png" width="50%">
+
+Same as Naive Pytorch chunking, we properly wrapped `torch.func.grad_and_value` properly inside custom autograd.
+
+Average memory requirement for 10k sequence dimension is 22GB
