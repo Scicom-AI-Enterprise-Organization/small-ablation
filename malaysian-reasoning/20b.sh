@@ -8,10 +8,11 @@ torchrun --nproc_per_node 4 \
 --per_device_train_batch_size 2 \
 --gradient_accumulation_steps 2 \
 --output_dir malaysian-reasoning-20b \
---bf16 --do_train --do_eval false --num_train_epochs 5 \
+--bf16 --do_train --do_eval false --num_train_epochs 3 \
 --train_file "tokenized-16k/tokenized-0" \
 --logging_steps 1 \
 --learning_rate 2e-4 \
+--warmup_steps 50 \
 --weight_decay 0.01 \
 --save_steps 50 \
 --save_total_limit 3 \

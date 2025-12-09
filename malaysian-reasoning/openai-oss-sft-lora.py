@@ -198,10 +198,9 @@ def main():
         def __len__(self):
             return len(self.dataset)
 
-
     quantization_config = Mxfp4Config(dequantize=True)
     model_kwargs = dict(
-        attn_implementation="flash_attention_3",
+        attn_implementation="kernels-community/vllm-flash-attn3",
         torch_dtype=model_args.model_dtype,
         quantization_config=quantization_config,
         use_cache=False,
