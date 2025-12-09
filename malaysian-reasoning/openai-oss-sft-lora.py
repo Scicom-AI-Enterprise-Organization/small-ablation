@@ -219,7 +219,6 @@ def main():
         r=model_args.rank,
         lora_alpha=model_args.alpha,
         target_modules="all-linear",
-        target_parameters=model_args.target_parameters.split(','),
     )
     peft_model = get_peft_model(model, peft_config)
 
