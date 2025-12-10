@@ -24,12 +24,14 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import torch.nn.init as init
+import torch.distributed as dist
 
 import logging
 import os
 import sys
 import wandb
 import time
+import functools
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -45,7 +47,19 @@ from transformers import (
 from transformers import GptOssForCausalLM, Mxfp4Config
 from transformers.models.gpt_oss.modeling_gpt_oss import load_balancing_loss_func, GptOssDecoderLayer
 from peft import LoraConfig, get_peft_model
-import deepspeed
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    MixedPrecision,
+    BackwardPrefetch,
+    ShardingStrategy,
+    FullStateDictConfig,
+    StateDictType,
+)
+from torch.distributed.fsdp.wrap import (
+    transformer_auto_wrap_policy,
+    enable_wrap,
+    wrap,
+)
 import streaming
 import json
 import numpy as np
@@ -63,7 +77,14 @@ class ModelArguments:
     """
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune, or train from scratch.
     """
-
+    local_rank: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "local rank"
+            )
+        },
+    )
     model_name_or_path: Optional[str] = field(
         default=None,
         metadata={
@@ -140,34 +161,22 @@ class Model(GptOssForCausalLM):
         
 def main():
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    local_rank = int(os.environ['LOCAL_RANK'])
+    rank = int(os.environ['RANK'])
+    world_size = int(os.environ['WORLD_SIZE'])
+
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-        model_args, data_args, training_args = parser.parse_json_file(
+        model_args, data_args = parser.parse_json_file(
             json_file=os.path.abspath(sys.argv[1]))
     else:
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+        model_args, data_args = parser.parse_args_into_dataclasses()
 
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
-
-    if training_args.should_log:
-        transformers.utils.logging.set_verbosity_info()
-
-    log_level = training_args.get_process_log_level()
-    logger.setLevel(log_level)
-    transformers.utils.logging.set_verbosity(log_level)
-    transformers.utils.logging.enable_default_handler()
-    transformers.utils.logging.enable_explicit_format()
-
-    logger.warning(
-        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}" +
-        f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}")
-    logger.info(f"Training/evaluation parameters {training_args}")
-
-    set_seed(training_args.seed)
 
     tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
 
@@ -201,7 +210,6 @@ def main():
     model_kwargs = dict(
         attn_implementation="kernels-community/vllm-flash-attn3",
         torch_dtype=model_args.model_dtype,
-        use_cache=False,
     )
     model = Model.from_pretrained(model_args.model_name_or_path, **model_kwargs)
 
@@ -218,50 +226,41 @@ def main():
         lora_alpha=model_args.alpha,
         target_modules="all-linear",
     )
-    model = get_peft_model(model, peft_config).to(torch.bfloat16)
-    for name, param in model.named_parameters(): 
-        if param.dtype != torch.bfloat16: 
-            print("Not BF16:", name, param.dtype)
+    model = get_peft_model(model, peft_config)
+
+    for name, param in model.named_parameters():
+        if param.dtype != torch.bfloat16:
+            print("Casting:", name, "from", param.dtype)
+            param.data = param.data.to(torch.bfloat16)
+
+    dist.init_process_group("nccl")
+
+    auto_wrap_policy = functools.partial(
+        transformer_auto_wrap_policy,
+        transformer_layer_cls={
+            GptOssDecoderLayer,
+        },
+    )
+    sharding_strategy: ShardingStrategy = ShardingStrategy.FULL_SHARD
+    torch.cuda.set_device(local_rank)
 
     dataset = DatasetFixed(data_args.train_file)
     print('dataset', len(dataset), dataset[0]['attention_mask'].shape)
+    
 
-    def collator(batch):
-        batch = [b for b in batch if b is not None]
-        input_ids = [b['input_ids'] for b in batch]
-        position_ids = [b['position_ids'] for b in batch]
-        labels = [b['input_ids'].copy() for b in batch]
-        attention_mask = [b['attention_mask'] for b in batch]
-        input_ids = np.concatenate(input_ids)
-        position_ids = np.concatenate(position_ids)
-        labels = np.concatenate(labels)
-        query_lens = np.concatenate(attention_mask)
-        cumsum = [0] + np.cumsum(query_lens).tolist()
-        max_cumsum = int(np.max(cumsum))
-        cu_seq_lens_q = torch.tensor(cumsum, dtype=torch.int32)
-        cu_seq_lens_k = torch.tensor(cumsum, dtype=torch.int32)
-        max_seqlen_q = np.max(query_lens)
-        return {
-            'input_ids': torch.tensor(input_ids)[None],
-            'position_ids': torch.tensor(position_ids)[None],
-            'labels': torch.tensor(labels)[None],
-            'cu_seq_lens_q': cu_seq_lens_q,
-            'cu_seq_lens_k': cu_seq_lens_k,
-            'max_length_q': max_seqlen_q,
-            'max_length_k': max_seqlen_q
-        }
-
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=dataset,
-        eval_dataset=None,
-        tokenizer=tokenizer,
-        data_collator=collator,
-        compute_metrics=None,
-        preprocess_logits_for_metrics=None,
+    bfSixteen = MixedPrecision(
+        param_dtype=torch.bfloat16,
+        reduce_dtype=torch.bfloat16,
+        buffer_dtype=torch.bfloat16,
     )
-    trainer.train()
+
+    mp_policy = bfSixteen
+    model = FSDP(model,
+        auto_wrap_policy=auto_wrap_policy,
+        mixed_precision=mp_policy,
+        device_id=torch.cuda.current_device())
+
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr)
 
 
 def _mp_fn(index):
