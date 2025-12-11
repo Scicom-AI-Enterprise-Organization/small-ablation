@@ -78,7 +78,6 @@ class ModelArguments:
     target_parameters: str = field(default="0.mlp.experts.gate_up_proj,1.mlp.experts.gate_up_proj,2.mlp.experts.gate_up_proj,3.mlp.experts.gate_up_proj,4.mlp.experts.gate_up_proj,5.mlp.experts.gate_up_proj,6.mlp.experts.gate_up_proj,7.mlp.experts.gate_up_proj,8.mlp.experts.gate_up_proj,9.mlp.experts.gate_up_proj,10.mlp.experts.gate_up_proj,11.mlp.experts.gate_up_proj,12.mlp.experts.gate_up_proj,13.mlp.experts.gate_up_proj,14.mlp.experts.gate_up_proj,15.mlp.experts.gate_up_proj,16.mlp.experts.gate_up_proj,17.mlp.experts.gate_up_proj,18.mlp.experts.gate_up_proj,19.mlp.experts.gate_up_proj,20.mlp.experts.gate_up_proj,21.mlp.experts.gate_up_proj,22.mlp.experts.gate_up_proj,23.mlp.experts.gate_up_proj", metadata={"help": "target parameters"}, )
 
 
-
 @dataclass
 class DataTrainingArguments:
     """
@@ -198,9 +197,11 @@ def main():
         def __len__(self):
             return len(self.dataset)
 
+    quantization_config = Mxfp4Config(dequantize=True)
     model_kwargs = dict(
         attn_implementation="kernels-community/vllm-flash-attn3",
         torch_dtype=model_args.model_dtype,
+        quantization_config=quantization_config,
         use_cache=False,
     )
     model = Model.from_pretrained(model_args.model_name_or_path, **model_kwargs)
@@ -212,16 +213,15 @@ def main():
             output.requires_grad_(True)
 
         model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+
+    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={'use_reentrant': True})
         
     peft_config = LoraConfig(
         r=model_args.rank,
         lora_alpha=model_args.alpha,
         target_modules="all-linear",
     )
-    model = get_peft_model(model, peft_config).to(torch.bfloat16)
-    for name, param in model.named_parameters(): 
-        if param.dtype != torch.bfloat16: 
-            print("Not BF16:", name, param.dtype)
+    model = get_peft_model(model, peft_config)
 
     dataset = DatasetFixed(data_args.train_file)
     print('dataset', len(dataset), dataset[0]['attention_mask'].shape)
