@@ -1,26 +1,26 @@
-CUDA_HOME="/usr/local/cuda-12.8" \
-WANDB_PROJECT="malaysian-reasoning-120b-lora-128" \
+CUDA_VISIBLE_DEVICES="6,7" \
+WANDB_PROJECT="malaysian-reasoning-20b" \
+WANDB_NAME="lora-r256" \
 TORCH_DISTRIBUTED_DEBUG="info" \
-torchrun --nproc_per_node 8 \
+torchrun --nproc_per_node 2 --master_port=29503 \
 -m openai-oss-sft-lora \
 --fsdp "full_shard auto_wrap" \
 --fsdp_config fsdp.json \
---model_name_or_path unsloth/gpt-oss-120b-BF16 \
+--model_name_or_path openai/gpt-oss-20b \
 --per_device_train_batch_size 2 \
 --gradient_accumulation_steps 2 \
---output_dir malaysian-reasoning-120b \
+--output_dir malaysian-reasoning-20b-lora-r256 \
 --bf16 --do_train --do_eval false --num_train_epochs 2 \
 --train_file "malaysian-reasoning-16k-mosaic" \
 --logging_steps 1 \
---learning_rate 2e-5 \
+--learning_rate 2e-4 \
 --warmup_steps 50 \
 --weight_decay 0.01 \
 --save_steps 1000 \
 --save_total_limit 3 \
 --model_dtype bfloat16 \
---rank 16 \
---alpha 32 \
+--rank 256 \
+--alpha 512 \
 --ddp_find_unused_parameters false \
 --dataloader_num_workers 5 \
---dataloader_prefetch_factor 4 \
---gradient_checkpointing_kwargs '{"use_reentrant": true}'
+--dataloader_prefetch_factor 4

@@ -30,6 +30,7 @@ import os
 import sys
 import wandb
 import time
+import math
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -43,8 +44,10 @@ from transformers import (
     set_seed,
 )
 from transformers import GptOssForCausalLM, Mxfp4Config
+from transformers.models.gpt_oss.modeling_gpt_oss import GptOssExperts
 from transformers.models.gpt_oss.modeling_gpt_oss import load_balancing_loss_func, GptOssDecoderLayer
 from peft import LoraConfig, get_peft_model
+import peft.utils.other as peft_other
 import deepspeed
 import streaming
 import json
@@ -75,8 +78,7 @@ class ModelArguments:
     model_dtype: str = field(default="bfloat16", metadata={"help": "model dtype"}, )
     rank: int = field(default=8, metadata={"help": "rank"}, )
     alpha: int = field(default=16, metadata={"help": "alpha"}, )
-    target_parameters: str = field(default="0.mlp.experts.gate_up_proj,1.mlp.experts.gate_up_proj,2.mlp.experts.gate_up_proj,3.mlp.experts.gate_up_proj,4.mlp.experts.gate_up_proj,5.mlp.experts.gate_up_proj,6.mlp.experts.gate_up_proj,7.mlp.experts.gate_up_proj,8.mlp.experts.gate_up_proj,9.mlp.experts.gate_up_proj,10.mlp.experts.gate_up_proj,11.mlp.experts.gate_up_proj,12.mlp.experts.gate_up_proj,13.mlp.experts.gate_up_proj,14.mlp.experts.gate_up_proj,15.mlp.experts.gate_up_proj,16.mlp.experts.gate_up_proj,17.mlp.experts.gate_up_proj,18.mlp.experts.gate_up_proj,19.mlp.experts.gate_up_proj,20.mlp.experts.gate_up_proj,21.mlp.experts.gate_up_proj,22.mlp.experts.gate_up_proj,23.mlp.experts.gate_up_proj", metadata={"help": "target parameters"}, )
-
+    include_expert_lora: bool = field(default=False, metadata={"help": "expert lora"}, )
 
 @dataclass
 class DataTrainingArguments:
@@ -136,7 +138,94 @@ class Model(GptOssForCausalLM):
             loss = loss / num_items_in_batch
             return {'loss': loss}
         return super_out
+
+class ExpertLoRA(nn.Module):
+    def __init__(self, experts_module, r=4, alpha=1.0):
+        super().__init__()
+        self.m = experts_module
+        self.r = r
+        self.alpha = alpha
+        self.scaling = alpha / r
+
+        E = self.m.num_experts
+        self.E = E
+        self.H = self.m.hidden_size
+        self.D = 2 * self.m.expert_dim
+        self.F = self.m.expert_dim
+
+        device = self.m.gate_up_proj.device
+        dtype = self.m.gate_up_proj.dtype
+
+        self.lora_gate_up_A = nn.ModuleDict({})
+        self.lora_gate_up_B = nn.ModuleDict({})
+        self.lora_down_A = nn.ModuleDict({})
+        self.lora_down_B = nn.ModuleDict({})
+
+        self.lora_gate_up_A['e'] = nn.Embedding(E, self.H * r, device=device, dtype=dtype)
+        self.lora_gate_up_B['e'] = nn.Embedding(E, r * self.D, device=device, dtype=dtype)
+        self.lora_down_A['e'] = nn.Embedding(E, self.F * r, device=device, dtype=dtype)
+        self.lora_down_B['e'] = nn.Embedding(E, r * self.H, device=device, dtype=dtype)
+
+        with torch.no_grad():
+            init.kaiming_uniform_(self.lora_gate_up_A['e'].weight.view(E, self.H, r), a=math.sqrt(5))
+            init.kaiming_uniform_(self.lora_down_A['e'].weight.view(E, self.F, r), a=math.sqrt(5))
+            self.lora_gate_up_B['e'].weight.zero_()
+            self.lora_down_B['e'].weight.zero_()
+    
+    def forward(self, hidden_states: torch.Tensor, router_indices=None, routing_weights=None):
+        batch_size = hidden_states.shape[0]
+        hidden_states = hidden_states.reshape(-1, self.H)
+        next_states = torch.zeros_like(hidden_states)
         
+        with torch.no_grad():
+            expert_mask = F.one_hot(router_indices, num_classes=self.E)
+            expert_mask = expert_mask.permute(2, 1, 0)
+            expert_hit_set = set(expert_mask.sum(dim=(-1, -2)).nonzero().squeeze(-1).tolist())
+        
+        all_indices = torch.arange(self.E, device=hidden_states.device)
+        all_A = self.lora_gate_up_A['e'](all_indices) 
+        all_B = self.lora_gate_up_B['e'](all_indices)
+        all_A2 = self.lora_down_A['e'](all_indices)
+        all_B2 = self.lora_down_B['e'](all_indices)
+        
+        dummy = (all_A.sum() + all_B.sum() + all_A2.sum() + all_B2.sum()) * 0.0
+        next_states = next_states + dummy
+        
+        for expert_idx in expert_hit_set:
+            if expert_idx >= self.E:
+                continue
+            
+            with torch.no_grad():
+                top_k_pos, token_idx = torch.where(expert_mask[expert_idx])
+            
+            if len(token_idx) == 0:
+                continue
+            
+            current_state = hidden_states[token_idx]
+            
+            A = all_A[expert_idx].view(self.H, self.r)
+            B = all_B[expert_idx].view(self.r, self.D)
+            
+            lora_update = (current_state @ A) @ B * self.scaling
+            
+            gate_up = (current_state @ self.m.gate_up_proj[expert_idx] + lora_update) + self.m.gate_up_proj_bias[expert_idx]
+            gate, up = gate_up[..., ::2], gate_up[..., 1::2]
+            gate = gate.clamp(max=self.m.limit)
+            up = up.clamp(min=-self.m.limit, max=self.m.limit)
+            glu = gate * torch.sigmoid(gate * self.m.alpha)
+            gated_output = (up + 1) * glu
+            
+            A2 = all_A2[expert_idx].view(self.F, self.r)
+            B2 = all_B2[expert_idx].view(self.r, self.H)
+            
+            lora_update2 = (gated_output @ A2) @ B2 * self.scaling
+            
+            out = (gated_output @ self.m.down_proj[expert_idx] + lora_update2) + self.m.down_proj_bias[expert_idx]
+            weighted_output = out * routing_weights[token_idx, top_k_pos, None]
+            next_states.index_add_(0, token_idx, weighted_output.to(hidden_states.dtype))
+        
+        return next_states.view(batch_size, -1, self.H)
+
 def main():
 
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
@@ -197,13 +286,15 @@ def main():
         def __len__(self):
             return len(self.dataset)
 
-    quantization_config = Mxfp4Config(dequantize=True)
     model_kwargs = dict(
         attn_implementation="kernels-community/vllm-flash-attn3",
         torch_dtype=model_args.model_dtype,
-        quantization_config=quantization_config,
         use_cache=False,
     )
+    if 'bf16' not in model_args.model_name_or_path.lower():
+        quantization_config = Mxfp4Config(dequantize=True)
+        model_kwargs['quantization_config'] = quantization_config
+
     model = Model.from_pretrained(model_args.model_name_or_path, **model_kwargs)
 
     if hasattr(model, "enable_input_require_grads"):
@@ -215,13 +306,27 @@ def main():
         model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
 
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={'use_reentrant': True})
-        
+
+    if model_args.include_expert_lora:
+
+        top_k = model.config.num_experts_per_tok
+        total_rank = model_args.rank
+        r = total_rank // top_k
+
+        for name, module in model.named_modules():
+            for child_name, child in module.named_children():
+                if child_name == 'experts' and isinstance(child, GptOssExperts):
+                    lora = ExpertLoRA(child, r=r, alpha=model_args.alpha)
+                    setattr(module, child_name, lora)
+
     peft_config = LoraConfig(
         r=model_args.rank,
         lora_alpha=model_args.alpha,
         target_modules="all-linear",
     )
     model = get_peft_model(model, peft_config)
+
+    print(model)
 
     dataset = DatasetFixed(data_args.train_file)
     print('dataset', len(dataset), dataset[0]['attention_mask'].shape)
@@ -261,6 +366,9 @@ def main():
         compute_metrics=None,
         preprocess_logits_for_metrics=None,
     )
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print(name, param.size())
     trainer.train()
 
 
