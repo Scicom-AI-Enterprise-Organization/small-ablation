@@ -183,11 +183,12 @@ class ExpertLoRA(nn.Module):
             expert_hit_set = set(expert_mask.sum(dim=(-1, -2)).nonzero().squeeze(-1).tolist())
         
         all_indices = torch.arange(self.E, device=hidden_states.device)
-        all_A = self.lora_gate_up_A['e'](all_indices) 
-        all_B = self.lora_gate_up_B['e'](all_indices)
-        all_A2 = self.lora_down_A['e'](all_indices)
-        all_B2 = self.lora_down_B['e'](all_indices)
+        all_A = self.lora_gate_up_A['e'](all_indices)      # [E, H*r]
+        all_B = self.lora_gate_up_B['e'](all_indices)      # [E, r*D]
+        all_A2 = self.lora_down_A['e'](all_indices)        # [E, F*r]
+        all_B2 = self.lora_down_B['e'](all_indices)        # [E, r*H]
         
+        # Dummy op to ensure gradient flows to all params
         dummy = (all_A.sum() + all_B.sum() + all_A2.sum() + all_B2.sum()) * 0.0
         next_states = next_states + dummy
         
@@ -225,6 +226,66 @@ class ExpertLoRA(nn.Module):
             next_states.index_add_(0, token_idx, weighted_output.to(hidden_states.dtype))
         
         return next_states.view(batch_size, -1, self.H)
+
+class LinearLoRA(nn.Module):
+    def __init__(self, linear: nn.Linear, r=4, alpha=1.0):
+        super().__init__()
+        self.linear = linear
+        self.r = r
+        self.alpha = alpha
+        self.scaling = alpha / r
+
+        in_features = linear.in_features
+        out_features = linear.out_features
+        
+        device = self.linear.weight.device
+        dtype = self.linear.weight.dtype
+
+        self.lora_A = nn.ModuleDict({})
+        self.lora_B = nn.ModuleDict({})
+        
+        self.lora_A['e'] = nn.Linear(
+            in_features, r, bias=False, 
+            device = device,
+            dtype = dtype,
+        )
+        self.lora_B['e'] = nn.Linear(
+            r, out_features, bias=False, 
+            device = device,
+            dtype = dtype,
+        )
+
+        for param in self.lora_A['e'].parameters():
+            param.requires_grad = True
+        for param in self.lora_B['e'].parameters():
+            param.requires_grad = True
+
+        init.kaiming_uniform_(self.lora_A['e'].weight, a=math.sqrt(5))
+        init.zeros_(self.lora_B['e'].weight)
+
+    def forward(self, x):
+        out = self.linear(x)
+        lora_update = self.lora_B['e'](self.lora_A['e'](x)) * self.scaling
+        return out + lora_update
+
+class ExtendTrainer(Trainer):
+    def _fsdp_qlora_plugin_updates(self):
+        from peft import PeftConfig
+        from peft.utils.other import fsdp_auto_wrap_policy
+        
+        self.accelerator.state.fsdp_plugin.auto_wrap_policy = fsdp_auto_wrap_policy(self.model)
+
+    def _save(self, output_dir: Optional[str] = None, state_dict=None):
+        import safetensors
+
+        output_dir = output_dir if output_dir is not None else self.args.output_dir
+        os.makedirs(output_dir, exist_ok=True)
+
+        state_dict = {k:v for k, v in state_dict.items() if '.e.' in k}
+
+        safetensors.torch.save_file(
+            state_dict, os.path.join(output_dir, 'weight.pt'), metadata={"format": "pt"}
+        )
 
 def main():
 
@@ -309,22 +370,33 @@ def main():
 
     if model_args.include_expert_lora:
 
-        top_k = model.config.num_experts_per_tok
-        total_rank = model_args.rank
-        r = total_rank // top_k
+        for name, param in model.named_parameters():
+            param.requires_grad = False
+
+        selected = [
+            "q_proj", 
+            "k_proj", 
+            "v_proj", 
+            "o_proj",
+        ]
 
         for name, module in model.named_modules():
             for child_name, child in module.named_children():
-                if child_name == 'experts' and isinstance(child, GptOssExperts):
-                    lora = ExpertLoRA(child, r=r, alpha=model_args.alpha)
+                if len(child_name) and any([a in child_name for a in selected]) and isinstance(child, nn.Linear):
+                    lora = LinearLoRA(child, r=model_args.rank, alpha=model_args.alpha)
                     setattr(module, child_name, lora)
 
-    peft_config = LoraConfig(
-        r=model_args.rank,
-        lora_alpha=model_args.alpha,
-        target_modules="all-linear",
-    )
-    model = get_peft_model(model, peft_config)
+                if child_name == 'experts' and isinstance(child, GptOssExperts):
+                    lora = ExpertLoRA(child, r=model_args.rank, alpha=model_args.alpha)
+                    setattr(module, child_name, lora)
+    
+    else:
+        peft_config = LoraConfig(
+            r=model_args.rank,
+            lora_alpha=model_args.alpha,
+            target_modules="all-linear",
+        )
+        model = get_peft_model(model, peft_config)
 
     print(model)
 
@@ -356,7 +428,7 @@ def main():
             'max_length_k': max_seqlen_q
         }
 
-    trainer = Trainer(
+    trainer = ExtendTrainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
@@ -366,9 +438,6 @@ def main():
         compute_metrics=None,
         preprocess_logits_for_metrics=None,
     )
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            print(name, param.size())
     trainer.train()
 
 
