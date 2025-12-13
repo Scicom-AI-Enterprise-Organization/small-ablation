@@ -180,7 +180,7 @@ class ExpertLoRA(nn.Module):
         with torch.no_grad():
             expert_mask = F.one_hot(router_indices, num_classes=self.E)
             expert_mask = expert_mask.permute(2, 1, 0)
-            expert_hit_set = set(expert_mask.sum(dim=(-1, -2)).nonzero().squeeze(-1).tolist())
+            expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
         
         all_indices = torch.arange(self.E, device=hidden_states.device)
         all_A = self.lora_gate_up_A['e'](all_indices)      # [E, H*r]
@@ -192,15 +192,14 @@ class ExpertLoRA(nn.Module):
         dummy = (all_A.sum() + all_B.sum() + all_A2.sum() + all_B2.sum()) * 0.0
         next_states = next_states + dummy
         
-        for expert_idx in expert_hit_set:
-            if expert_idx >= self.E:
+        for expert_idx in expert_hit[:]:
+            expert_idx = expert_idx[0]
+
+            if expert_idx == self.m.num_experts:
                 continue
             
             with torch.no_grad():
                 top_k_pos, token_idx = torch.where(expert_mask[expert_idx])
-            
-            if len(token_idx) == 0:
-                continue
             
             current_state = hidden_states[token_idx]
             
