@@ -24,4 +24,5 @@ torchrun --nproc_per_node 2 --master_port=29503 \
 --ddp_find_unused_parameters false \
 --dataloader_num_workers 5 \
 --dataloader_prefetch_factor 4 \
---include_expert_lora true
+--include_expert_lora true \
+--save_only_model true

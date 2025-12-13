@@ -161,12 +161,13 @@ class ExpertLoRA(nn.Module):
         self.lora_down_A = nn.ModuleDict({})
         self.lora_down_B = nn.ModuleDict({})
 
-        self.lora_gate_up_A['e'] = nn.Embedding(E, self.H * r, device=device, dtype=dtype)
-        self.lora_gate_up_B['e'] = nn.Embedding(E, r * self.D, device=device, dtype=dtype)
-        self.lora_down_A['e'] = nn.Embedding(E, self.F * r, device=device, dtype=dtype)
-        self.lora_down_B['e'] = nn.Embedding(E, r * self.H, device=device, dtype=dtype)
+        self.lora_gate_up_A['e'] = nn.Embedding(E, self.H * r, device=device, dtype=torch.float32)
+        self.lora_gate_up_B['e'] = nn.Embedding(E, r * self.D, device=device, dtype=torch.float32)
+        self.lora_down_A['e'] = nn.Embedding(E, self.F * r, device=device, dtype=torch.float32)
+        self.lora_down_B['e'] = nn.Embedding(E, r * self.H, device=device, dtype=torch.float32)
 
         with torch.no_grad():
+            # https://github.com/huggingface/peft/blob/main/src/peft/tuners/lora/layer.py#L260
             init.kaiming_uniform_(self.lora_gate_up_A['e'].weight.view(E, self.H, r), a=math.sqrt(5))
             init.kaiming_uniform_(self.lora_down_A['e'].weight.view(E, self.F, r), a=math.sqrt(5))
             self.lora_gate_up_B['e'].weight.zero_()
@@ -206,7 +207,8 @@ class ExpertLoRA(nn.Module):
             A = all_A[expert_idx].view(self.H, self.r)
             B = all_B[expert_idx].view(self.r, self.D)
             
-            lora_update = (current_state @ A) @ B * self.scaling
+            lora_update = (current_state.to(A.dtype) @ A) @ B * self.scaling
+            lora_update = lora_update.to(current_state.dtype)
             
             gate_up = (current_state @ self.m.gate_up_proj[expert_idx] + lora_update) + self.m.gate_up_proj_bias[expert_idx]
             gate, up = gate_up[..., ::2], gate_up[..., 1::2]
@@ -218,7 +220,8 @@ class ExpertLoRA(nn.Module):
             A2 = all_A2[expert_idx].view(self.F, self.r)
             B2 = all_B2[expert_idx].view(self.r, self.H)
             
-            lora_update2 = (gated_output @ A2) @ B2 * self.scaling
+            lora_update2 = (gated_output.to(A2.dtype) @ A2) @ B2 * self.scaling
+            lora_update2 = lora_update2.to(gated_output.dtype)
             
             out = (gated_output @ self.m.down_proj[expert_idx] + lora_update2) + self.m.down_proj_bias[expert_idx]
             weighted_output = out * routing_weights[token_idx, top_k_pos, None]
@@ -246,12 +249,12 @@ class LinearLoRA(nn.Module):
         self.lora_A['e'] = nn.Linear(
             in_features, r, bias=False, 
             device = device,
-            dtype = dtype,
+            dtype = torch.float32,
         )
         self.lora_B['e'] = nn.Linear(
             r, out_features, bias=False, 
             device = device,
-            dtype = dtype,
+            dtype = torch.float32,
         )
 
         for param in self.lora_A['e'].parameters():
@@ -259,13 +262,14 @@ class LinearLoRA(nn.Module):
         for param in self.lora_B['e'].parameters():
             param.requires_grad = True
 
+        # https://github.com/huggingface/peft/blob/main/src/peft/tuners/lora/layer.py#L260
         init.kaiming_uniform_(self.lora_A['e'].weight, a=math.sqrt(5))
         init.zeros_(self.lora_B['e'].weight)
 
     def forward(self, x):
         out = self.linear(x)
-        lora_update = self.lora_B['e'](self.lora_A['e'](x)) * self.scaling
-        return out + lora_update
+        lora_update = self.lora_B['e'](self.lora_A['e'](x.to(self.lora_A['e'].weight.dtype))) * self.scaling
+        return out + lora_update.to(x.dtype)
 
 class ExtendTrainer(Trainer):
     def _fsdp_qlora_plugin_updates(self):
@@ -379,6 +383,17 @@ def main():
             "o_proj",
         ]
 
+        """
+        https://thinkingmachines.ai/blog/lora/
+        For the MoE experiment, we trained a separate LoRA on each expert, 
+        with the rank of each equal to the total rank divided by the number of active experts (equal to 8 for Qwen3 MoE). 
+        This scaling keeps the ratio of LoRA parameters to FullFT parameters the same for MoE layers as for other layers.
+        """
+
+        top_k = model.config.num_experts_per_tok
+        r = model_args.rank // top_k
+        alpha = model_args.alpha // top_k
+
         for name, module in model.named_modules():
             for child_name, child in module.named_children():
                 if len(child_name) and any([a in child_name for a in selected]) and isinstance(child, nn.Linear):
@@ -386,9 +401,10 @@ def main():
                     setattr(module, child_name, lora)
 
                 if child_name == 'experts' and isinstance(child, GptOssExperts):
-                    lora = ExpertLoRA(child, r=model_args.rank, alpha=model_args.alpha)
+                    lora = ExpertLoRA(child, r=r, alpha=alpha)
                     setattr(module, child_name, lora)
-    
+
+        selected_trainer = ExtendTrainer
     else:
         peft_config = LoraConfig(
             r=model_args.rank,
@@ -396,7 +412,8 @@ def main():
             target_modules="all-linear",
         )
         model = get_peft_model(model, peft_config)
-
+        selected_trainer = Trainer
+        
     print(model)
 
     dataset = DatasetFixed(data_args.train_file)
@@ -427,7 +444,7 @@ def main():
             'max_length_k': max_seqlen_q
         }
 
-    trainer = ExtendTrainer(
+    trainer = selected_trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
@@ -437,6 +454,9 @@ def main():
         compute_metrics=None,
         preprocess_logits_for_metrics=None,
     )
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print(name, param.size(), param.dtype)
     trainer.train()
 
 
