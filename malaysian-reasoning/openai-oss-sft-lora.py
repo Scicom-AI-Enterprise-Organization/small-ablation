@@ -31,6 +31,7 @@ import sys
 import wandb
 import time
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -79,6 +80,7 @@ class ModelArguments:
     rank: int = field(default=8, metadata={"help": "rank"}, )
     alpha: int = field(default=16, metadata={"help": "alpha"}, )
     include_expert_lora: bool = field(default=False, metadata={"help": "expert lora"}, )
+    specific_layers: str = field(default="", metadata={"help": "model dtype"}, )
 
 @dataclass
 class DataTrainingArguments:
@@ -394,6 +396,11 @@ def main():
         r = model_args.rank // top_k
         alpha = model_args.alpha // top_k
 
+        specific_layers = []
+        for l in model_args.specific_layers.split(','):
+            if len(l):
+                specific_layers.append(int(l))
+
         for name, module in model.named_modules():
             for child_name, child in module.named_children():
                 if len(child_name) and any([a in child_name for a in selected]) and isinstance(child, nn.Linear):
@@ -401,6 +408,10 @@ def main():
                     setattr(module, child_name, lora)
 
                 if child_name == 'experts' and isinstance(child, GptOssExperts):
+                    num = re.search(r"\.layers\.(\d+)\.", name).group(1)
+                    if len(specific_layers) and num not in specific_layers:
+                        continue
+                    print(child_name)
                     lora = ExpertLoRA(child, r=r, alpha=alpha)
                     setattr(module, child_name, lora)
 
