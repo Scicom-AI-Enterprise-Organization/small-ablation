@@ -25,11 +25,24 @@ We benchmark using https://huggingface.co/datasets/UMxYTLAILabs/MalayMMLU
 1. Merge with base model,
 
 - merge self attention linear layers using PEFT LoRA checkpoints with base model, [notebook/merge-lora-20.ipynb](notebook/merge-lora-20.ipynb)
-- merge custom made linear and expert layers with base model, [notebook/manual-merge-experts-20b.ipynb](notebook/manual-merge-experts-20b.ipynb)
+- merge custom made linear and expert layers with base model, [notebook/merge-manual.ipynb](notebook/merge-manual.ipynb)
 
-2. Evaluating merge models using vLLM inside subprocess inside multiprocessing, [notebook/malaymmlu-20b.ipynb](notebook/malaymmlu-20b.ipynb)
-3. Calculate accuracy, [notebook/accuracy-malaymmlu-20b.ipynb](notebook/accuracy-malaymmlu-20b.ipynb)
+2. Evaluating merge models using vLLM inside subprocess inside multiprocessing,
+
+```bash
+python3 malaymmlu.py --pattern '*-merged' --num_gpus 8
+```
+
+3. Calculate accuracy,
+
+```bash
+calculate_malaymmlu.py
+```
 
 ## Scale up to GPT OSS 120B
+
+We use the best rank parameter for linear layers and experts.
+
+## Scale up to GLM-4.5-Air
 
 We use the best rank parameter for linear layers and experts.
