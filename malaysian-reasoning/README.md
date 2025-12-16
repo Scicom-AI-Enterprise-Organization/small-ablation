@@ -22,7 +22,7 @@ https://wandb.ai/aies-scicom-scicom-ai/malaysian-reasoning-20b
 
 We benchmark using https://huggingface.co/datasets/UMxYTLAILabs/MalayMMLU
 
-<img src="lora_accuracy.png" width="50%">
+<img src="lora_accuracy.png" width="100%">
 
 1. Merge with base model,
 
