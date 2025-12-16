@@ -22,6 +22,8 @@ https://wandb.ai/aies-scicom-scicom-ai/malaysian-reasoning-20b
 
 We benchmark using https://huggingface.co/datasets/UMxYTLAILabs/MalayMMLU
 
+<img src="lora_accuracy.png" width="50%">
+
 1. Merge with base model,
 
 - merge self attention linear layers using PEFT LoRA checkpoints with base model, [notebook/merge-lora-20.ipynb](notebook/merge-lora-20.ipynb)
@@ -39,10 +41,26 @@ python3 malaymmlu.py --pattern '*-merged' --num_gpus 8
 calculate_malaymmlu.py
 ```
 
+```
+malaymmlu-malaysian-reasoning-20b-lora-r512-experts-merged 0.4944662805130327 0.7711522548613984
+malaymmlu-malaysian-reasoning-20b-lora-r128-experts-merged 0.4516388871677303 0.6049941136377719
+malaymmlu-malaysian-reasoning-20b-lora-r128-merged 0.6151082108045597 0.8538741120105733
+malaymmlu-malaysian-reasoning-20b-lora-r32-selected-experts-merged 0.5944926922262233 0.8365600508366872
+malaymmlu-malaysian-reasoning-20b-lora-r16-merged 0.6103171980835949 0.8461093672559061
+malaymmlu-malaysian-reasoning-20b-lora-r128-selected-experts-merged 0.6058979018668429 0.8409053361969271
+malaymmlu-malaysian-reasoning-20b-lora-r64-selected-experts-merged 0.598135874067937 0.8254349627174814
+malaymmlu-malaysian-reasoning-20b-lora-r256-selected-experts-merged 0.6237604510985806 0.829088080886642
+malaymmlu-malaysian-reasoning-20b-lora-r256-experts-merged 0.4916788779568767 0.7169771823320076
+malaymmlu-malaysian-reasoning-20b-lora-r512-selected-experts-merged 0.608107538662509 0.8249968395769247
+malaymmlu-malaysian-reasoning-20b-lora-r16-experts-merged 0.43287707291392474 0.6925068000350969
+malaymmlu-malaysian-reasoning-20b-lora-r16-selected-experts-merged 0.6015023818248443 0.8407230975937462
+malaymmlu-malaysian-reasoning-20b-lora-r32-merged 0.6082934082273252 0.8466049892615232
+malaymmlu-malaysian-reasoning-20b-lora-r32-experts-merged 0.4361610599673062 0.6942269637787146
+malaymmlu-malaysian-reasoning-20b-lora-r64-merged 0.6182629166150415 0.850989138066328
+malaymmlu-malaysian-reasoning-20b-lora-r512-merged 0.6250361376120266 0.8578862594474043
+malaymmlu-malaysian-reasoning-20b-lora-r256-merged 0.6211126254491389 0.8535497460042126
+```
+
 ## Scale up to GPT OSS 120B
-
-We use the best rank parameter for linear layers and experts.
-
-## Scale up to GLM-4.5-Air
 
 We use the best rank parameter for linear layers and experts.

@@ -36,6 +36,7 @@ for f in folders:
     total_k5 = 0
     total = 0
     wrong = []
+    l = len(malaymmlu)
     for i in range(len(malaymmlu)):
         try:
             results = []
@@ -61,4 +62,4 @@ for f in folders:
             pass
 
     if total > 0:
-        print(f, total_k1 / total, total_k5 / total)
+        print(f, total_k1 / l, total_k5 / l)
