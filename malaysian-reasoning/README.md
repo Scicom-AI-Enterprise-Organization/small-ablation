@@ -18,6 +18,8 @@ LoRA SFT on https://huggingface.co/datasets/mesolitica/Malaysian-Reasoning
 
 https://wandb.ai/aies-scicom-scicom-ai/malaysian-reasoning-20b
 
+<img src="loss.png" width="50%">
+
 ### Benchmark
 
 We benchmark using https://huggingface.co/datasets/UMxYTLAILabs/MalayMMLU
@@ -61,6 +63,17 @@ malaymmlu-malaysian-reasoning-20b-lora-r512-merged 0.6250361376120266 0.85788625
 malaymmlu-malaysian-reasoning-20b-lora-r256-merged 0.6211126254491389 0.8535497460042126
 ```
 
+### What we learnt
+
+1. LoRA weight always in FP32, during merging, merge in FP32, only downcast to base layer precision during add, our custom Linear LoRA module achieved the same loss as PEFT LoRA, https://wandb.ai/aies-scicom-scicom-ai/malaysian-reasoning-20b/runs/bdgdqjhw
+2. FSDP 1 is pain, I think everyone should move on from FSDP 1, for `use_orig_params=False` you cannot put trainable and non-trainable weights in the same module, so you have to wrap the trainable weights in separate module such as `nn.ModuleDict`, and if you use `huggingface.Trainer`, make sure you patch `self.accelerator.state.fsdp_plugin.auto_wrap_policy = fsdp_auto_wrap_policy(self.model)`.
+
 ## Scale up to GPT OSS 120B
 
-We use the best rank parameter for linear layers and experts.
+We use the best rank parameter for linear layers **only**, model pushed at https://huggingface.co/Scicom-intl/gpt-oss-120b-Malaysian-Reasoning-SFT-v0.1
+
+Achieved `malaymmlu-120b 0.7650559616734811 0.9618923718663528`
+
+### WanDB
+
+https://wandb.ai/aies-scicom-scicom-ai/malaysian-reasoning-120b
