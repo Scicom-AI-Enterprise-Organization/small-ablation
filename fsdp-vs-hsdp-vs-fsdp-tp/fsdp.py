@@ -1,9 +1,17 @@
+import os
 import math
+import time
 import torch
 from torch import nn
 import torch.nn.functional as F
 import torch.nn.init as init
 from torch.utils.data import Dataset, DataLoader
+from functools import partial
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    CheckpointImpl,
+    apply_activation_checkpointing,
+    checkpoint_wrapper,
+)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.utils.data.distributed import DistributedSampler
 from transformers import (
@@ -12,12 +20,12 @@ from transformers import (
     Qwen3ForCausalLM,
 )
 from transformers.models.qwen3.modeling_qwen3 import Qwen3DecoderLayer
-from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
-from cut_cross_entropy import linear_cross_entropy
+from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy, CPUOffloadPolicy
 from liger_kernel.transformers import apply_liger_kernel_to_qwen3
 from streaming import LocalDataset
 from streaming.base.format.mds.encodings import Encoding, _encodings
 from tqdm import tqdm
+import numpy as np
 import wandb
 
 class UInt32(Encoding):
@@ -91,12 +99,12 @@ class LinearLoRA(nn.Module):
         self.lora_A['e'] = nn.Linear(
             in_features, r, bias=False, 
             device = device,
-            dtype = torch.float32,
+            dtype = dtype,
         )
         self.lora_B['e'] = nn.Linear(
             r, out_features, bias=False, 
             device = device,
-            dtype = torch.float32,
+            dtype = dtype,
         )
 
         for param in self.lora_A['e'].parameters():
@@ -113,6 +121,14 @@ class LinearLoRA(nn.Module):
         lora_update = self.lora_B['e'](self.lora_A['e'](x.to(self.lora_A['e'].weight.dtype))) * self.scaling
         return out + lora_update.to(x.dtype)
         
+def check_fn(module):
+    return isinstance(module, Qwen3DecoderLayer) 
+
+non_reentrant_wrapper = partial(
+    checkpoint_wrapper,
+    checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+)
+
 def main():
     rank = int(os.environ["LOCAL_RANK"])
     world_size = int(os.environ['WORLD_SIZE'])
@@ -122,7 +138,11 @@ def main():
     print(f"Running on rank {rank} on device {device}")
     
     backend = torch.distributed.get_default_backend_for_device(device)
-    torch.distributed.init_process_group(backend=backend, device_id=device)
+    torch.distributed.init_process_group("cuda:nccl,cpu:gloo")
+    num_threads = os.cpu_count() // (
+        torch.cuda.device_count() if torch.cuda.is_available() else 1
+    )
+    torch.set_num_threads(num_threads)
     device_mesh = init_device_mesh(device_type.type, (world_size,), mesh_dim_names=("dp",))
     dp_mesh = device_mesh["dp"]
     dp_rank = dp_mesh.get_local_rank()
@@ -143,14 +163,15 @@ def main():
     log_interval = 1
     total_steps = 500
     dataset = 'multipacking'
-    batch_size = 8
-    grad_accumulation = 4
+    batch_size = 4
+    grad_accumulation = 2
 
     model = Qwen3ForCausalLM.from_pretrained(
         model_name, 
         attn_implementation='flash_attention_3',
         torch_dtype=torch.bfloat16,
     )
+    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={'use_reentrant': True})
     selected = [
         "q_proj", 
         "k_proj", 
@@ -171,12 +192,19 @@ def main():
         param_dtype=torch.bfloat16,
         reduce_dtype=torch.float32,
     )
+    # fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
     for module in model.modules():
         if isinstance(module, Qwen3DecoderLayer):
             fully_shard(module, **fsdp_kwargs)
     fully_shard(model, **fsdp_kwargs)
 
-    train_dataset = Dataset(dataset)
+    apply_activation_checkpointing(
+        model,
+        checkpoint_wrapper_fn=non_reentrant_wrapper,
+        check_fn=check_fn,
+    )
+
+    dataset = Dataset(dataset)
     sampler = DistributedSampler(
         dataset,
         num_replicas=dp_world_size,
@@ -203,6 +231,8 @@ def main():
     step = 0
     pbar = tqdm(total=total_steps, initial=step)
     iter_train_loader = iter(train_loader)
+    if rank == 0:
+        wandb.init()
     
     while step < total_steps:
         batches = []
@@ -226,7 +256,7 @@ def main():
             loss = out["loss"] / grad_accumulation
             loss.backward()
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optim.step()
         scheduler.step()
         optim.zero_grad()
@@ -237,7 +267,7 @@ def main():
 
         throughput_per_sec = len(batches) * batch_size * 4096 / dt
 
-        if (step + 1) % log_interval == 0:
+        if (step + 1) % log_interval == 0 and rank == 0:
             scalar_dict = {
                 "grad_norm": grad_norm,
                 "lr_g": scheduler.get_last_lr()[0],
