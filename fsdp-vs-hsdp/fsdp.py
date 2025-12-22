@@ -171,7 +171,6 @@ def main():
         attn_implementation='flash_attention_3',
         torch_dtype=torch.bfloat16,
     )
-    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={'use_reentrant': True})
     selected = [
         "q_proj", 
         "k_proj", 
