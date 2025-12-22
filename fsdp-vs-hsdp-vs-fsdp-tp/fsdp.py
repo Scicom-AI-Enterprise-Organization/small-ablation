@@ -158,13 +158,13 @@ def main():
 
     set_seed(42)
     model_name = "Qwen/Qwen3-14B"
-    warmup_steps = 50
+    warmup_steps = 20
     learning_rate = 1e-4
     log_interval = 1
-    total_steps = 500
+    total_steps = 200
     dataset = 'multipacking'
-    batch_size = 4
-    grad_accumulation = 2
+    batch_size = 8
+    grad_accumulation = 1
 
     model = Qwen3ForCausalLM.from_pretrained(
         model_name, 
@@ -192,6 +192,9 @@ def main():
         param_dtype=torch.bfloat16,
         reduce_dtype=torch.float32,
     )
+    # only save some memory
+    # but do not forgot torch.distributed.init_process_group("cuda:nccl,cpu:gloo")
+    # check the comment https://github.com/axolotl-ai-cloud/axolotl/issues/3058#issuecomment-3177615390
     # fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
     for module in model.modules():
         if isinstance(module, Qwen3DecoderLayer):
@@ -203,6 +206,7 @@ def main():
         checkpoint_wrapper_fn=non_reentrant_wrapper,
         check_fn=check_fn,
     )
+    model = torch.compile(model)
 
     dataset = Dataset(dataset)
     sampler = DistributedSampler(
@@ -220,7 +224,7 @@ def main():
         pin_memory=True,
         collate_fn=collator,
     )
-    optim = torch.optim.AdamW(model.parameters(), lr=2e-5, fused=True)
+    optim = torch.optim.AdamW(model.parameters(), lr=1e-4, fused=True)
     scheduler = get_wsd_schedule(
         optim, 
         warmup_steps, 
@@ -273,7 +277,7 @@ def main():
                 "lr_g": scheduler.get_last_lr()[0],
                 "loss": loss.item() * grad_accumulation,
                 "global_step": step,
-                "throughput_per_sec": throughput_per_sec,
+                "throughput_per_sec": throughput_per_sec * world_size,
             }
             try:
                 wandb.log(scalar_dict)
