@@ -181,6 +181,10 @@ def main():
         attn_implementation='flash_attention_3',
         torch_dtype=torch.bfloat16,
     )
+
+    for name, param in model.named_parameters():
+        param.requires_grad = False
+        
     selected = [
         "q_proj", 
         "k_proj", 
