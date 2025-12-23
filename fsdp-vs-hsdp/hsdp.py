@@ -143,7 +143,7 @@ def main():
         torch.cuda.device_count() if torch.cuda.is_available() else 1
     )
     torch.set_num_threads(num_threads)
-    device_mesh = init_device_mesh(device_type.type, (2, 4), mesh_dim_names=("dp", "shard"))
+    device_mesh = init_device_mesh(device_type.type, (4, 2), mesh_dim_names=("dp", "shard"))
     dp_mesh = device_mesh["dp"]
     dp_rank = dp_mesh.get_local_rank()
     dp_world_size = dp_mesh.size()
@@ -164,7 +164,7 @@ def main():
     total_steps = 200
     dataset = 'multipacking'
     batch_size = 4
-    grad_accumulation = 8
+    grad_accumulation = 4
 
     model = Qwen3ForCausalLM.from_pretrained(
         model_name, 
@@ -174,7 +174,7 @@ def main():
 
     for name, param in model.named_parameters():
         param.requires_grad = False
-        
+
     selected = [
         "q_proj", 
         "k_proj", 
