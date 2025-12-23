@@ -12,24 +12,15 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
     checkpoint_wrapper,
 )
-from torch.distributed._tensor import Shard, Replicate
-from torch.distributed.tensor.parallel import (
-    parallelize_module,
-    ColwiseParallel,
-    RowwiseParallel,
-)
-from torch import distributed as dist
-from torch.distributed.tensor import distribute_tensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.utils.data.distributed import DistributedSampler
-from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy, CPUOffloadPolicy
 from transformers import (
     set_seed,
     get_wsd_schedule,
     Qwen3ForCausalLM,
 )
 from transformers.models.qwen3.modeling_qwen3 import Qwen3DecoderLayer
-from liger_kernel.transformers import LigerFusedLinearCrossEntropyLoss
+from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy, CPUOffloadPolicy
 from liger_kernel.transformers import apply_liger_kernel_to_qwen3
 from streaming import LocalDataset
 from streaming.base.format.mds.encodings import Encoding, _encodings
@@ -138,46 +129,6 @@ non_reentrant_wrapper = partial(
     checkpoint_impl=CheckpointImpl.NO_REENTRANT,
 )
 
-@torch.no_grad()
-def clip_grad_norm_(parameters, max_norm, norm_type=2.0):
-    if isinstance(parameters, torch.Tensor):
-        parameters = [parameters]
-    else:
-        parameters = list(parameters)
-    
-    grads = [p.grad for p in parameters if p.grad is not None]
-    print(len(grads))
-    
-    norms = []
-    for grad in grads:
-        if hasattr(grad, 'full_tensor'):  # DTensor
-            grad_full = grad.full_tensor()
-        else:
-            grad_full = grad
-        
-        if norm_type == float('inf'):
-            norms.append(grad_full.abs().max())
-        else:
-            norms.append(grad_full.norm(norm_type))
-    
-    if len(norms) == 0:
-        return torch.tensor(0.0)
-
-    print(len(norms))
-    
-    total_norm = torch.stack(norms).norm(norm_type)
-    
-    clip_coef = max_norm / (total_norm + 1e-6)
-    clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
-    
-    for grad in grads:
-        if hasattr(grad, 'full_tensor'):  # DTensor
-            grad.mul_(clip_coef_clamped)
-        else:
-            grad.mul_(clip_coef_clamped)
-    
-    return total_norm
-
 def main():
     rank = int(os.environ["LOCAL_RANK"])
     world_size = int(os.environ['WORLD_SIZE'])
@@ -192,8 +143,7 @@ def main():
         torch.cuda.device_count() if torch.cuda.is_available() else 1
     )
     torch.set_num_threads(num_threads)
-    device_mesh = init_device_mesh(device_type.type, (2, 4), mesh_dim_names=("dp", "tp"))
-    tp_mesh = device_mesh["tp"]
+    device_mesh = init_device_mesh(device_type.type, (2, 4), mesh_dim_names=("dp", "shard"))
     dp_mesh = device_mesh["dp"]
     dp_rank = dp_mesh.get_local_rank()
     dp_world_size = dp_mesh.size()
@@ -213,7 +163,7 @@ def main():
     log_interval = 1
     total_steps = 200
     dataset = 'multipacking'
-    batch_size = 1
+    batch_size = 4
     grad_accumulation = 8
 
     model = Qwen3ForCausalLM.from_pretrained(
@@ -245,48 +195,15 @@ def main():
         param_dtype=torch.bfloat16,
         reduce_dtype=torch.float32,
     )
-    fsdp_kwargs["mesh"] = dp_mesh
+    fsdp_kwargs["mesh"] = device_mesh
     # only save some memory
     # but do not forgot torch.distributed.init_process_group("cuda:nccl,cpu:gloo")
     # check the comment https://github.com/axolotl-ai-cloud/axolotl/issues/3058#issuecomment-3177615390
     # fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
-
-    for layer_id, block in enumerate(model.model.layers):
-        layer_tp_plan = {
-
-            "self_attn.q_proj.linear": ColwiseParallel(),
-            "self_attn.q_proj.lora_A.e": RowwiseParallel(input_layouts=Replicate()),
-            "self_attn.q_proj.lora_B.e": ColwiseParallel(),   
-
-            "self_attn.k_proj.linear": ColwiseParallel(),
-            "self_attn.k_proj.lora_A.e": RowwiseParallel(input_layouts=Replicate()),
-            "self_attn.k_proj.lora_B.e": ColwiseParallel(),
-
-            "self_attn.v_proj.linear": ColwiseParallel(),
-            "self_attn.v_proj.lora_A.e": RowwiseParallel(input_layouts=Replicate()),
-            "self_attn.v_proj.lora_B.e": ColwiseParallel(),
-
-            "self_attn.o_proj.linear": RowwiseParallel(),
-            "self_attn.o_proj.lora_A.e": RowwiseParallel(),
-
-            "mlp.gate_proj.linear": ColwiseParallel(),
-            "mlp.gate_proj.lora_A.e": RowwiseParallel(input_layouts=Replicate()),
-            "mlp.gate_proj.lora_B.e": ColwiseParallel(),
-
-            "mlp.up_proj.linear": ColwiseParallel(),
-            "mlp.up_proj.lora_A.e": RowwiseParallel(input_layouts=Replicate()),
-            "mlp.up_proj.lora_B.e": ColwiseParallel(),
-
-            "mlp.down_proj.linear": RowwiseParallel(),
-            "mlp.down_proj.lora_A.e": RowwiseParallel(),
-        }
-        parallelize_module(
-            module=block,
-            device_mesh=tp_mesh,
-            parallelize_plan=layer_tp_plan
-        )
-
-    model = fully_shard(model, **fsdp_kwargs)
+    for module in model.modules():
+        if isinstance(module, Qwen3DecoderLayer):
+            fully_shard(module, **fsdp_kwargs)
+    fully_shard(model, **fsdp_kwargs)
 
     apply_activation_checkpointing(
         model,
@@ -311,7 +228,7 @@ def main():
         pin_memory=True,
         collate_fn=collator,
     )
-    optim = torch.optim.AdamW(model.parameters(), lr=1e-4, foreach=True)
+    optim = torch.optim.AdamW(model.parameters(), lr=1e-4, fused=True)
     scheduler = get_wsd_schedule(
         optim, 
         warmup_steps, 
@@ -347,7 +264,7 @@ def main():
             loss = out["loss"] / grad_accumulation
             loss.backward()
 
-        grad_norm = clip_grad_norm_(model.parameters(), 1.0)
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optim.step()
         scheduler.step()
         optim.zero_grad()
