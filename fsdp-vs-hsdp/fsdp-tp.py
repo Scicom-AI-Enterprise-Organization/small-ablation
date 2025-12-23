@@ -17,51 +17,25 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     ColwiseParallel,
     RowwiseParallel,
-    PrepareModuleInput,
-    SequenceParallel
 )
+from torch import distributed as dist
 from torch.distributed.tensor import distribute_tensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.utils.data.distributed import DistributedSampler
+from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy, CPUOffloadPolicy
 from transformers import (
     set_seed,
     get_wsd_schedule,
     Qwen3ForCausalLM,
 )
 from transformers.models.qwen3.modeling_qwen3 import Qwen3DecoderLayer
-from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy, CPUOffloadPolicy
+from liger_kernel.transformers import LigerFusedLinearCrossEntropyLoss
 from liger_kernel.transformers import apply_liger_kernel_to_qwen3
 from streaming import LocalDataset
 from streaming.base.format.mds.encodings import Encoding, _encodings
 from tqdm import tqdm
 import numpy as np
 import wandb
-
-def dtensor_aware_apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
-    """RoPE that handles DTensor inputs"""
-    cos = cos.unsqueeze(unsqueeze_dim)
-    sin = sin.unsqueeze(unsqueeze_dim)
-
-    print('qqqq', q.shape, q._local_tensor.shape, cos.shape, q.device_mesh, q.placements)
-    
-    # Convert cos/sin to DTensor if q/k are DTensor
-    if hasattr(q, 'placements'):  # Check if q is DTensor
-        cos = distribute_tensor(cos, q.device_mesh, q.placements)
-        sin = distribute_tensor(sin, q.device_mesh, q.placements)
-    
-    def rotate_half(x):
-        x1 = x[..., : x.shape[-1] // 2]
-        x2 = x[..., x.shape[-1] // 2 :]
-        return torch.cat((-x2, x1), dim=-1)
-
-    print('qqqq', q.shape, q._local_tensor.shape, cos.shape)
-    
-    q_embed = (q * cos) + (rotate_half(q) * sin)
-    k_embed = (k * cos) + (rotate_half(k) * sin)
-    return q_embed, k_embed
-
-import transformers.models.qwen3.modeling_qwen3 as qwen3_modeling
-qwen3_modeling.apply_rotary_pos_emb = dtensor_aware_apply_rotary_pos_emb
 
 class UInt32(Encoding):
     def encode(self, obj) -> bytes:
@@ -164,7 +138,6 @@ non_reentrant_wrapper = partial(
     checkpoint_impl=CheckpointImpl.NO_REENTRANT,
 )
 
-
 def main():
     rank = int(os.environ["LOCAL_RANK"])
     world_size = int(os.environ['WORLD_SIZE'])
@@ -188,7 +161,7 @@ def main():
     apply_liger_kernel_to_qwen3(
         rope=False,
         swiglu=True,
-        rms_norm=False, # Please disable for seq parallelism
+        rms_norm=True,
         cross_entropy=False,
         fused_linear_cross_entropy=True,
     )
@@ -200,7 +173,7 @@ def main():
     log_interval = 1
     total_steps = 200
     dataset = 'multipacking'
-    batch_size = 4
+    batch_size = 1
     grad_accumulation = 8
 
     model = Qwen3ForCausalLM.from_pretrained(
@@ -234,70 +207,34 @@ def main():
     # check the comment https://github.com/axolotl-ai-cloud/axolotl/issues/3058#issuecomment-3177615390
     # fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
 
-    model.model = parallelize_module(
-        model.model,
-        tp_mesh,
-        {
-            "embed_tokens": ColwiseParallel(
-                input_layouts=Replicate(),
-                output_layouts=Shard(1),
-            ),
-            "norm": SequenceParallel(),
-            "output": ColwiseParallel(
-                input_layouts=Shard(1),
-                output_layouts=Replicate()
-            ),
-        }
-    )
-
-    # generate using https://chatgpt.com/share/6948e61c-7d0c-8005-9685-e5c87add6727
     for layer_id, block in enumerate(model.model.layers):
         layer_tp_plan = {
-            # Norms
-            "input_layernorm": SequenceParallel(),
-            "post_attention_layernorm": SequenceParallel(),
 
-            # Attention projections (LinearLoRA-aware)
-            # Base + lora_B share sharding, lora_A stays replicated
+            "self_attn.q_proj.linear": ColwiseParallel(),
+            "self_attn.q_proj.lora_A.e": RowwiseParallel(input_layouts=Replicate()),
+            "self_attn.q_proj.lora_B.e": ColwiseParallel(),   
 
-            "self_attn.q_norm": SequenceParallel(),
-            "self_attn.k_norm": SequenceParallel(),
+            "self_attn.k_proj.linear": ColwiseParallel(),
+            "self_attn.k_proj.lora_A.e": RowwiseParallel(input_layouts=Replicate()),
+            "self_attn.k_proj.lora_B.e": ColwiseParallel(),
 
-            # q_proj
-            "self_attn.q_proj.linear": ColwiseParallel(use_local_output=False),
-            "self_attn.q_proj.lora_B.e": ColwiseParallel(use_local_output=False),
-            "self_attn.q_proj.lora_A.e": ColwiseParallel(use_local_output=False),
+            "self_attn.v_proj.linear": ColwiseParallel(),
+            "self_attn.v_proj.lora_A.e": RowwiseParallel(input_layouts=Replicate()),
+            "self_attn.v_proj.lora_B.e": ColwiseParallel(),
 
-            # k_proj
-            "self_attn.k_proj.linear": ColwiseParallel(use_local_output=False),
-            "self_attn.k_proj.lora_B.e": ColwiseParallel(use_local_output=False),
-            "self_attn.k_proj.lora_A.e": ColwiseParallel(use_local_output=False),
+            "self_attn.o_proj.linear": RowwiseParallel(),
+            "self_attn.o_proj.lora_A.e": RowwiseParallel(),
 
-            # v_proj
-            "self_attn.v_proj.linear": ColwiseParallel(use_local_output=False),
-            "self_attn.v_proj.lora_B.e": ColwiseParallel(use_local_output=False),
-            "self_attn.v_proj.lora_A.e": ColwiseParallel(use_local_output=False),
+            "mlp.gate_proj.linear": ColwiseParallel(),
+            "mlp.gate_proj.lora_A.e": RowwiseParallel(input_layouts=Replicate()),
+            "mlp.gate_proj.lora_B.e": ColwiseParallel(),
 
-            # o_proj
-            "self_attn.o_proj.linear": ColwiseParallel(use_local_output=False),
-            "self_attn.o_proj.lora_B.e": ColwiseParallel(use_local_output=False),
-            "self_attn.o_proj.lora_A.e": ColwiseParallel(use_local_output=False),
+            "mlp.up_proj.linear": ColwiseParallel(),
+            "mlp.up_proj.lora_A.e": RowwiseParallel(input_layouts=Replicate()),
+            "mlp.up_proj.lora_B.e": ColwiseParallel(),
 
-            # up, gate, down
-            # gate_proj
-            "mlp.gate_proj.linear": ColwiseParallel(use_local_output=False),
-            "mlp.gate_proj.lora_B.e": ColwiseParallel(use_local_output=False),
-            "mlp.gate_proj.lora_A.e": ColwiseParallel(use_local_output=False),
-
-            # up_proj
-            "mlp.up_proj.linear": ColwiseParallel(use_local_output=False),
-            "mlp.up_proj.lora_B.e": ColwiseParallel(use_local_output=False),
-            "mlp.up_proj.lora_A.e": ColwiseParallel(use_local_output=False),
-
-            # down_proj
-            "mlp.down_proj.linear": ColwiseParallel(use_local_output=False),
-            "mlp.down_proj.lora_B.e": ColwiseParallel(use_local_output=False),
-            "mlp.down_proj.lora_A.e": ColwiseParallel(use_local_output=False),
+            "mlp.down_proj.linear": RowwiseParallel(),
+            "mlp.down_proj.lora_A.e": RowwiseParallel(),
         }
         parallelize_module(
             module=block,
@@ -305,14 +242,14 @@ def main():
             parallelize_plan=layer_tp_plan
         )
 
-    fully_shard(model, **fsdp_kwargs)
+    model = fully_shard(model, **fsdp_kwargs)
 
     apply_activation_checkpointing(
         model,
         checkpoint_wrapper_fn=non_reentrant_wrapper,
         check_fn=check_fn,
     )
-    # model = torch.compile(model)
+    model = torch.compile(model)
 
     dataset = Dataset(dataset)
     sampler = DistributedSampler(
@@ -330,7 +267,7 @@ def main():
         pin_memory=True,
         collate_fn=collator,
     )
-    optim = torch.optim.AdamW(model.parameters(), lr=1e-4, fused=True)
+    optim = torch.optim.AdamW(model.parameters(), lr=1e-4, foreach=True)
     scheduler = get_wsd_schedule(
         optim, 
         warmup_steps, 
@@ -366,7 +303,7 @@ def main():
             loss = out["loss"] / grad_accumulation
             loss.backward()
 
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        # grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optim.step()
         scheduler.step()
         optim.zero_grad()
@@ -379,7 +316,7 @@ def main():
 
         if (step + 1) % log_interval == 0 and rank == 0:
             scalar_dict = {
-                "grad_norm": grad_norm,
+                # "grad_norm": grad_norm,
                 "lr_g": scheduler.get_last_lr()[0],
                 "loss": loss.item() * grad_accumulation,
                 "global_step": step,

@@ -4,7 +4,7 @@ TORCH_DISTRIBUTED_DEBUG="info" \
 torchrun --nproc_per_node 8 --master_port=29502 \
 -m lora-llama3 \
 --deepspeed "ds_config_zero3.json" \
---model_name_or_path "ramdisk/Qwen2.5-72B-Instruct" \
+--model_name_or_path "ramdisk/Meta-Llama-3.1-70B-Instruct" \
 --per_device_train_batch_size 1 \
 --gradient_accumulation_steps 4 \
 --output_dir ds3-llama3.1-70b-lora-256 \
