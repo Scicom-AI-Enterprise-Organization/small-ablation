@@ -22,7 +22,9 @@ https://wandb.ai/aies-scicom-scicom-ai/malaysian-sft
 
 We benchmark using https://huggingface.co/datasets/UMxYTLAILabs/MalayMMLU
 
-1. Calculate accuracy,
+#### Reasoning
+
+1. Run generation,
 
 For Qwen/Qwen3-32B,
 
@@ -40,4 +42,21 @@ For meta-llama/Llama-3.1-70B-Instruct,
 
 ```bash
 python3 malaymmlu.py --pattern "ds3-llama3.1-70b-lora-256*" --num_gpus 8 --gpu_partition 4
+```
+
+2. Calculate accuracy,
+
+For Qwen/Qwen2.5-72B-Instruct,
+
+```bash
+python3 calculate_malaymmlu.py --pattern "malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-*"
+```
+
+```
+malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-321 72502
+malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-642 72455
+malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-963 72506
+malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-321 0.7362600952578173 0.8753365085939118
+malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-642 0.7099594261095077 0.8589952733509014
+malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-963 0.7334719334719335 0.8741787941787942
 ```
