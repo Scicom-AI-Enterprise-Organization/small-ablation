@@ -33,11 +33,11 @@ python3 malaymmlu.py --pattern "ds3-qwen3-32b-lora-256*" --num_gpus 8 --gpu_part
 For Qwen/Qwen2.5-72B-Instruct,
 
 ```bash
-python3 malaymmlu.py --pattern "ds3-qwen2.5-72b-lora-256*" --num_gpus 8 --gpu_partition 2
+python3 malaymmlu.py --pattern "ds3-qwen2.5-72b-lora-256*" --num_gpus 8 --gpu_partition 4
 ```
 
 For meta-llama/Llama-3.1-70B-Instruct,
 
 ```bash
-python3 malaymmlu.py --pattern "ds3-llama3.1-70b-lora-256*" --num_gpus 8 --gpu_partition 2
+python3 malaymmlu.py --pattern "ds3-llama3.1-70b-lora-256*" --num_gpus 8 --gpu_partition 4
 ```

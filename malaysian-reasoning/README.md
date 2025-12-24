@@ -72,7 +72,11 @@ malaymmlu-malaysian-reasoning-20b-lora-r256-merged 0.6211126254491389 0.85354974
 
 We use the best rank parameter for linear layers **only**, model pushed at https://huggingface.co/Scicom-intl/gpt-oss-120b-Malaysian-Reasoning-SFT-v0.1
 
-Achieved `malaymmlu-120b 0.7650559616734811 0.9618923718663528`
+Achieved,
+
+```
+malaymmlu-120b 0.6650559616734811 0.8618923718663528
+```
 
 ### WanDB
 

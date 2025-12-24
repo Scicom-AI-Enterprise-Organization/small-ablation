@@ -29,7 +29,7 @@ from tqdm import tqdm
 @dataclass
 class Config:
     """Configuration for evaluation."""
-    gpu_memory_utilization: float = 0.95
+    gpu_memory_utilization: float = 0.9
     max_tokens: int = 4096
     num_repeats: int = 3
     max_workers: int = 50
@@ -188,7 +188,7 @@ class VLLMServer:
 
 class MalayMMLUEvaluator:
 
-    ANSWER_PATTERN = re.compile(r"\\boxed\{([^}]*)\}")
+    ANSWER_PATTERN = re.compile(r"boxed\{([^}]*)\}")
 
     def __init__(self, server: VLLMServer, output_dir: Path, config: Config):
         self.server = server
@@ -242,11 +242,18 @@ class MalayMMLUEvaluator:
             messages = self._build_messages(question)
 
             for attempt in range(self.config.max_retries):
-                response = self.server.generate(messages)
-                if response is None:
-                    continue
+                
+                answer = None
+                for _ in range(3):
+                    response = self.server.generate(messages)
+                    if response is None:
+                        continue
 
-                answer = self._extract_answer(response)
+                    answer = self._extract_answer(response)
+                    if answer not in 'ABCDEF':
+                        continue
+                    break
+                    
                 if answer is not None:
                     self._save_result(question_id, repeat_id, answer)
                     break
