@@ -331,7 +331,7 @@ def main():
             try:
                 batch = next(iter_train_loader)
             except StopIteration:
-                iter_train_loader = iter(loader)
+                iter_train_loader = iter(train_loader)
                 batch = next(iter_train_loader)
             batches.append(batch)
         

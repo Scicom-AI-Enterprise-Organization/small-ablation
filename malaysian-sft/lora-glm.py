@@ -44,9 +44,8 @@ from transformers import (
     TrainingArguments,
     set_seed,
 )
-from transformers import GptOssForCausalLM, Mxfp4Config
-from transformers.models.gpt_oss.modeling_gpt_oss import GptOssExperts
-from transformers.models.gpt_oss.modeling_gpt_oss import load_balancing_loss_func, GptOssDecoderLayer
+from transformers import Glm4MoeForCausalLM
+from transformers.models.glm4_moe.modeling_glm4_moe import Glm4MoeNaiveMoe, Glm4MoeDecoderLayer
 from peft import LoraConfig, get_peft_model
 import peft.utils.other as peft_other
 import deepspeed
@@ -80,7 +79,6 @@ class ModelArguments:
     rank: int = field(default=8, metadata={"help": "rank"}, )
     alpha: int = field(default=16, metadata={"help": "alpha"}, )
     include_expert_lora: bool = field(default=False, metadata={"help": "expert lora"}, )
-    specific_layers: str = field(default="", metadata={"help": "model dtype"}, )
 
 @dataclass
 class DataTrainingArguments:
@@ -92,7 +90,7 @@ class DataTrainingArguments:
         default=None, metadata={
             "help": "The input training data file (a text file)."})
 
-class Model(GptOssForCausalLM):
+class Model(Glm4MoeForCausalLM):
     def __init__(self, config):
         super().__init__(config)
         self.loss = LigerFusedLinearCrossEntropyLoss(reduction="sum")
@@ -127,15 +125,6 @@ class Model(GptOssForCausalLM):
             labels = labels.reshape(-1)
             loss = self.loss(self.lm_head.weight, embeddings, labels)
             num_items_in_batch = num_items_in_batch.to(loss.device)
-            
-            if output_router_logits:
-                aux_loss = load_balancing_loss_func(
-                    super_out.router_logits,
-                    self.num_experts,
-                    self.num_experts_per_tok,
-                    attention_mask,
-                )
-                loss += self.router_aux_loss_coef * aux_loss.to(loss.device)
 
             loss = loss / num_items_in_batch
             return {'loss': loss}
@@ -152,11 +141,10 @@ class ExpertLoRA(nn.Module):
         E = self.m.num_experts
         self.E = E
         self.H = self.m.hidden_size
-        self.D = 2 * self.m.expert_dim
-        self.F = self.m.expert_dim
+        self.D = 2 * self.m.intermediate_dim
+        self.F = self.m.intermediate_dim
 
         device = self.m.gate_up_proj.device
-        dtype = self.m.gate_up_proj.dtype
 
         self.lora_gate_up_A = nn.ModuleDict({})
         self.lora_gate_up_B = nn.ModuleDict({})
@@ -169,11 +157,10 @@ class ExpertLoRA(nn.Module):
         self.lora_down_B['e'] = nn.Embedding(E, r * self.H, device=device, dtype=torch.float32)
 
         with torch.no_grad():
-            # https://github.com/huggingface/peft/blob/main/src/peft/tuners/lora/layer.py#L260
             init.kaiming_uniform_(self.lora_gate_up_A['e'].weight.view(E, self.H, r), a=math.sqrt(5))
             init.kaiming_uniform_(self.lora_down_A['e'].weight.view(E, self.F, r), a=math.sqrt(5))
-            self.lora_gate_up_B['e'].weight.zero_()
-            self.lora_down_B['e'].weight.zero_()
+            self.lora_gate_up_B.weight.zero_()
+            self.lora_down_B.weight.zero_()
     
     def forward(self, hidden_states: torch.Tensor, router_indices=None, routing_weights=None):
         batch_size = hidden_states.shape[0]
@@ -186,48 +173,46 @@ class ExpertLoRA(nn.Module):
             expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
         
         all_indices = torch.arange(self.E, device=hidden_states.device)
-        all_A = self.lora_gate_up_A['e'](all_indices)      # [E, H*r]
-        all_B = self.lora_gate_up_B['e'](all_indices)      # [E, r*D]
-        all_A2 = self.lora_down_A['e'](all_indices)        # [E, F*r]
-        all_B2 = self.lora_down_B['e'](all_indices)        # [E, r*H]
+        all_A = self.lora_gate_up_A(all_indices)
+        all_B = self.lora_gate_up_B(all_indices)
+        all_A2 = self.lora_down_A(all_indices)
+        all_B2 = self.lora_down_B(all_indices)
         
-        # Dummy op to ensure gradient flows to all params
-        dummy = (all_A.sum() + all_B.sum() + all_A2.sum() + all_B2.sum()) * 0.0
-        next_states = next_states + dummy
+        # Dummy op for gradient flow
+        next_states = next_states + (all_A.sum() + all_B.sum() + all_A2.sum() + all_B2.sum()) * 0.0
         
-        for expert_idx in expert_hit[:]:
-            expert_idx = expert_idx[0]
+        for expert_idx_tensor in expert_hit:
+            expert_idx = expert_idx_tensor[0]
 
-            if expert_idx == self.m.num_experts:
+            if expert_idx >= self.E:
                 continue
             
             with torch.no_grad():
                 top_k_pos, token_idx = torch.where(expert_mask[expert_idx])
             
+            if token_idx.numel() == 0:
+                continue
+            
             current_state = hidden_states[token_idx]
             
+            # Gate-up LoRA
             A = all_A[expert_idx].view(self.H, self.r)
             B = all_B[expert_idx].view(self.r, self.D)
+            lora_update = (current_state.float() @ A @ B * self.scaling).to(current_state.dtype)
             
-            lora_update = (current_state.to(A.dtype) @ A) @ B * self.scaling
-            lora_update = lora_update.to(current_state.dtype)
-            
-            gate_up = (current_state @ self.m.gate_up_proj[expert_idx] + lora_update) + self.m.gate_up_proj_bias[expert_idx]
+            gate_up = current_state @ self.m.gate_up_proj[expert_idx] + lora_update + self.m.gate_up_proj_bias[expert_idx]
             gate, up = gate_up[..., ::2], gate_up[..., 1::2]
             gate = gate.clamp(max=self.m.limit)
             up = up.clamp(min=-self.m.limit, max=self.m.limit)
-            glu = gate * torch.sigmoid(gate * self.m.alpha)
-            gated_output = (up + 1) * glu
+            gated_output = (up + 1) * (gate * torch.sigmoid(gate * self.m.alpha))
             
+            # Down LoRA
             A2 = all_A2[expert_idx].view(self.F, self.r)
             B2 = all_B2[expert_idx].view(self.r, self.H)
+            lora_update2 = (gated_output.float() @ A2 @ B2 * self.scaling).to(gated_output.dtype)
             
-            lora_update2 = (gated_output.to(A2.dtype) @ A2) @ B2 * self.scaling
-            lora_update2 = lora_update2.to(gated_output.dtype)
-            
-            out = (gated_output @ self.m.down_proj[expert_idx] + lora_update2) + self.m.down_proj_bias[expert_idx]
-            weighted_output = out * routing_weights[token_idx, top_k_pos, None]
-            next_states.index_add_(0, token_idx, weighted_output.to(hidden_states.dtype))
+            out = gated_output @ self.m.down_proj[expert_idx] + lora_update2 + self.m.down_proj_bias[expert_idx]
+            next_states.index_add_(0, token_idx, (out * routing_weights[token_idx, top_k_pos, None]).to(hidden_states.dtype))
         
         return next_states.view(batch_size, -1, self.H)
 
@@ -357,9 +342,6 @@ def main():
         torch_dtype=model_args.model_dtype,
         use_cache=False,
     )
-    if 'bf16' not in model_args.model_name_or_path.lower():
-        quantization_config = Mxfp4Config(dequantize=True)
-        model_kwargs['quantization_config'] = quantization_config
 
     model = Model.from_pretrained(model_args.model_name_or_path, **model_kwargs)
 
@@ -383,6 +365,9 @@ def main():
             "k_proj", 
             "v_proj", 
             "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj"
         ]
 
         """
@@ -396,21 +381,13 @@ def main():
         r = model_args.rank // top_k
         alpha = model_args.alpha // top_k
 
-        specific_layers = []
-        for l in model_args.specific_layers.split(','):
-            if len(l):
-                specific_layers.append(int(l))
-
         for name, module in model.named_modules():
             for child_name, child in module.named_children():
                 if len(child_name) and any([a in child_name for a in selected]) and isinstance(child, nn.Linear):
                     lora = LinearLoRA(child, r=model_args.rank, alpha=model_args.alpha)
                     setattr(module, child_name, lora)
 
-                if child_name == 'experts' and isinstance(child, GptOssExperts):
-                    num = re.search(r"\.layers\.(\d+)\.", name).group(1)
-                    if len(specific_layers) and num not in specific_layers:
-                        continue
+                if child_name == 'experts' and isinstance(child, Glm4MoeNaiveMoe):
                     lora = ExpertLoRA(child, r=r, alpha=alpha)
                     setattr(module, child_name, lora)
 
