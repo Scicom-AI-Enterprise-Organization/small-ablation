@@ -152,11 +152,10 @@ class ExpertLoRA(nn.Module):
         device = self.m.gate_up_proj.device
         dtype = self.m.gate_up_proj.dtype
 
-        lora_gate_up_A = nn.Parameter(torch.zeros(E, self.H, r, dtype=dtype))
-        lora_gate_up_B = nn.Parameter(torch.zeros(E, r, self.D, dtype=dtype))
-
-        lora_down_A = nn.Parameter(torch.zeros(E, self.F, r, dtype=dtype))
-        lora_down_B = nn.Parameter(torch.zeros(E, r, self.H, dtype=dtype))
+        lora_gate_up_A = torch.zeros(E, self.H, r, dtype=dtype)
+        lora_gate_up_B = torch.zeros(E, r, self.D, dtype=dtype)
+        lora_down_A = torch.zeros(E, self.F, r, dtype=dtype)
+        lora_down_B = torch.zeros(E, r, self.H, dtype=dtype)
 
         with torch.no_grad():
             # https://github.com/huggingface/peft/blob/main/src/peft/tuners/lora/layer.py#L260
@@ -195,32 +194,32 @@ class ExpertLoRA(nn.Module):
             placements=[Shard(0)]
         )
 
-        self.lora_gate_up_A = distribute_tensor(
+        self.lora_gate_up_A = nn.Parameter(distribute_tensor(
             lora_gate_up_A,
             device_mesh=tp_mesh,
             placements=[Shard(0)]
-        )
-        self.lora_gate_up_B = distribute_tensor(
+        ))
+        self.lora_gate_up_B = nn.Parameter(distribute_tensor(
             lora_gate_up_B,
             device_mesh=tp_mesh,
             placements=[Shard(0)]
-        )
-        self.lora_down_A = distribute_tensor(
+        ))
+        self.lora_down_A = nn.Parameter(distribute_tensor(
             lora_down_A,
             device_mesh=tp_mesh,
             placements=[Shard(0)]
-        )
-        self.lora_down_B = distribute_tensor(
+        ))
+        self.lora_down_B = nn.Parameter(distribute_tensor(
             lora_down_B,
             device_mesh=tp_mesh,
             placements=[Shard(0)]
-        )
-
-        del lora_gate_up_A, lora_gate_up_B, lora_down_A, lora_down_B
+        ))
 
         self.tp_mesh = tp_mesh
         self.world_size = tp_mesh.size()
         self.experts_per_rank = E // self.world_size
+
+        del lora_gate_up_A, lora_gate_up_B, lora_down_A, lora_down_B
 
     def forward(self, hidden_states: torch.Tensor, router_indices=None, routing_weights=None):
         """Optimized forward with single to_local() call and local expert processing"""
@@ -266,6 +265,7 @@ class ExpertLoRA(nn.Module):
             
             current_state = hidden_states[token_idx]
             
+            # LoRA for gate_up - use local indices
             lora_update = (current_state @ lora_gate_up_A_local[local_expert_idx]) @ \
                           lora_gate_up_B_local[local_expert_idx] * self.scaling
             
@@ -278,6 +278,7 @@ class ExpertLoRA(nn.Module):
             glu = gate * torch.sigmoid(gate * self.m.alpha)
             gated_output = (up + 1) * glu
             
+            # LoRA for down - use local indices
             lora_update = (gated_output @ lora_down_A_local[local_expert_idx]) @ \
                           lora_down_B_local[local_expert_idx] * self.scaling
             
@@ -287,6 +288,7 @@ class ExpertLoRA(nn.Module):
             weighted_output = out * routing_weights[token_idx, top_k_pos, None]
             next_states.index_add_(0, token_idx, weighted_output.to(hidden_states.dtype))
         
+        # Single all-reduce at the end
         dist.all_reduce(next_states, group=self.tp_mesh.get_group())
         
         return next_states.view(batch_size, -1, self.H)
@@ -397,15 +399,12 @@ def main():
 
     set_seed(42)
     model_name = "unsloth/gpt-oss-20b-BF16"
-    checkpoint_dir = model_name.replace('/', '-')
     warmup_steps = 50
     learning_rate = 1e-4
     total_steps = 200
     dataset = 'malaysian-reasoning-16k-mosaic'
     batch_size = 8
-    grad_accumulation = 1
-
-    os.makedirs(checkpoint_dir, exist_ok=True)
+    grad_accumulation = 4
     
     model = Model.from_pretrained(
         model_name, 
@@ -507,13 +506,14 @@ def main():
             try:
                 batch = next(iter_train_loader)
             except StopIteration:
-                iter_train_loader = iter(loader)
+                iter_train_loader = iter(train_loader)
                 batch = next(iter_train_loader)
             total_tokens += batch['input_ids'].shape[1]
             batches.append(batch)
 
         token_tensor = torch.tensor([total_tokens], dtype=torch.long, device=device)
-        dist.all_reduce(token_tensor, op=dist.ReduceOp.SUM)
+        dp_group = dp_mesh.get_group()
+        dist.all_reduce(token_tensor, op=dist.ReduceOp.SUM, group=dp_group)
         global_total_tokens = token_tensor.item()
         total_global_total_tokens += global_total_tokens
         
@@ -528,7 +528,7 @@ def main():
             
             b['num_items_in_batch'] = torch.tensor(global_total_tokens)
             out = model(**b, use_cache=False)
-            loss = out["loss"]
+            loss = out["loss"] * dp_world_size
             loss.backward()
             loss_sum += loss
 
