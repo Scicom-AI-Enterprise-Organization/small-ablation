@@ -53,10 +53,25 @@ python3 calculate_malaymmlu.py --pattern "malaymmlu-ds3-qwen2.5-72b-lora-256-che
 ```
 
 ```
-malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-321 72502
-malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-642 72455
-malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-963 72506
-malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-321 0.7362600952578173 0.8753365085939118
-malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-642 0.7099594261095077 0.8589952733509014
-malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-963 0.7334719334719335 0.8741787941787942
+malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-321 72637
+malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-642 72638
+malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-963 72639
+malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-321 0.7362932925063103 0.8756155087516034
+malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-642 0.7099172863230011 0.859177876180132
+malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-963 0.7331145634294259 0.8742211514496968
+```
+
+For meta-llama/Llama-3.1-70B-Instruct,
+
+```bash
+python3 calculate_malaymmlu.py --pattern "malaymmlu-ds3-llama3.1-70b-lora-256-checkpoint-*"
+```
+
+```
+malaymmlu-ds3-llama3.1-70b-lora-256-checkpoint-323 72616
+malaymmlu-ds3-llama3.1-70b-lora-256-checkpoint-969 72638
+malaymmlu-ds3-llama3.1-70b-lora-256-checkpoint-646 72638
+malaymmlu-ds3-llama3.1-70b-lora-256-checkpoint-323 0.7516212978644305 0.8755834606964352
+malaymmlu-ds3-llama3.1-70b-lora-256-checkpoint-969 0.7591789534547557 0.8759757155247181
+malaymmlu-ds3-llama3.1-70b-lora-256-checkpoint-646 0.7588485524305125 0.8737455086110767
 ```

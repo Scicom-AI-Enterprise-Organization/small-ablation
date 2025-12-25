@@ -1,7 +1,10 @@
+import torch
+
+torch._dynamo.config.capture_scalar_outputs = True
+
 import os
 import math
 import time
-import torch
 from torch import nn
 import torch.nn.functional as F
 import torch.nn.init as init
@@ -17,10 +20,12 @@ from torch.distributed.tensor import distribute_tensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.utils.data.distributed import DistributedSampler
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy, CPUOffloadPolicy
+from torch.distributed._tensor import Shard, Replicate
 from transformers import (
     set_seed,
     get_linear_schedule_with_warmup,
     GptOssForCausalLM,
+    Mxfp4Config,
 )
 from transformers.models.gpt_oss.modeling_gpt_oss import GptOssExperts
 from transformers.models.gpt_oss.modeling_gpt_oss import load_balancing_loss_func, GptOssDecoderLayer
@@ -46,6 +51,7 @@ class Dataset(Dataset):
     
     def __getitem__(self, idx):
         data = self.dataset[idx]
+        data.pop('audio', None)
         data.pop('text', None)
         data.pop('token_type_ids', None)
 
@@ -148,11 +154,10 @@ class ExpertLoRA(nn.Module):
         device = self.m.gate_up_proj.device
         dtype = self.m.gate_up_proj.dtype
 
-        lora_gate_up_A = nn.Parameter(torch.zeros(E, self.H, r, dtype=dtype))
-        lora_gate_up_B = nn.Parameter(torch.zeros(E, r, self.D, dtype=dtype))
-
-        lora_down_A = nn.Parameter(torch.zeros(E, self.F, r, dtype=dtype))
-        lora_down_B = nn.Parameter(torch.zeros(E, r, self.H, dtype=dtype))
+        lora_gate_up_A = torch.zeros(E, self.H, r, dtype=dtype)
+        lora_gate_up_B = torch.zeros(E, r, self.D, dtype=dtype)
+        lora_down_A = torch.zeros(E, self.F, r, dtype=dtype)
+        lora_down_B = torch.zeros(E, r, self.H, dtype=dtype)
 
         with torch.no_grad():
             # https://github.com/huggingface/peft/blob/main/src/peft/tuners/lora/layer.py#L260
@@ -191,70 +196,106 @@ class ExpertLoRA(nn.Module):
             placements=[Shard(0)]
         )
 
-        self.lora_gate_up_A = distribute_tensor(
+        self.lora_gate_up_A = nn.Parameter(distribute_tensor(
             lora_gate_up_A,
             device_mesh=tp_mesh,
             placements=[Shard(0)]
-        )
-        self.lora_gate_up_B = distribute_tensor(
+        ))
+        self.lora_gate_up_B = nn.Parameter(distribute_tensor(
             lora_gate_up_B,
             device_mesh=tp_mesh,
             placements=[Shard(0)]
-        )
-        self.lora_down_A = distribute_tensor(
+        ))
+        self.lora_down_A = nn.Parameter(distribute_tensor(
             lora_down_A,
             device_mesh=tp_mesh,
             placements=[Shard(0)]
-        )
-        self.lora_down_B = distribute_tensor(
+        ))
+        self.lora_down_B = nn.Parameter(distribute_tensor(
             lora_down_B,
             device_mesh=tp_mesh,
             placements=[Shard(0)]
-        )
+        ))
+
+        self.tp_mesh = tp_mesh
+        self.world_size = tp_mesh.size()
+        self.experts_per_rank = E // self.world_size
 
         del lora_gate_up_A, lora_gate_up_B, lora_down_A, lora_down_B
 
+        self.tp_mesh = tp_mesh
+        self.world_size = tp_mesh.size()
+        self.experts_per_rank = E // self.world_size
+
     def forward(self, hidden_states: torch.Tensor, router_indices=None, routing_weights=None):
+        """Optimized forward with single to_local() call and local expert processing"""
         batch_size = hidden_states.shape[0]
         hidden_states = hidden_states.reshape(-1, self.H)
         next_states = torch.zeros_like(hidden_states)
         
+        # Get local rank and expert range
+        local_rank = self.tp_mesh.get_local_rank()
+        local_start = local_rank * self.experts_per_rank
+        local_end = local_start + self.experts_per_rank
+        
+        # Get ALL local weights once (no communication)
+        gate_up_proj_local = self.m.gate_up_proj.to_local()
+        gate_up_bias_local = self.m.gate_up_proj_bias.to_local()
+        down_proj_local = self.m.down_proj.to_local()
+        down_bias_local = self.m.down_proj_bias.to_local()
+        
+        lora_gate_up_A_local = self.lora_gate_up_A.to_local()
+        lora_gate_up_B_local = self.lora_gate_up_B.to_local()
+        lora_down_A_local = self.lora_down_A.to_local()
+        lora_down_B_local = self.lora_down_B.to_local()
+        
+        # Precompute expert masks for local experts only
         with torch.no_grad():
             expert_mask = F.one_hot(router_indices, num_classes=self.E)
             expert_mask = expert_mask.permute(2, 1, 0)
-            expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
+            
+            # Filter to local experts
+            local_expert_mask = expert_mask[local_start:local_end]
+            expert_hit = torch.greater(local_expert_mask.sum(dim=(-1, -2)), 0).nonzero()
         
-        for expert_idx in expert_hit[:]:
-            expert_idx = expert_idx[0]
-
-            if expert_idx == self.m.num_experts:
-                continue
+        # Process only local experts
+        for local_expert_idx_tensor in expert_hit:
+            local_expert_idx = local_expert_idx_tensor[0].item()
+            global_expert_idx = local_start + local_expert_idx
             
             with torch.no_grad():
-                top_k_pos, token_idx = torch.where(expert_mask[expert_idx])
+                top_k_pos, token_idx = torch.where(expert_mask[global_expert_idx])
+            
+            if token_idx.numel() == 0:
+                continue
             
             current_state = hidden_states[token_idx]
-            A = self.lora_gate_up_A[expert_idx].to_local()
-            B = self.lora_gate_up_B[expert_idx].to_local()
             
-            lora_update = (current_state @ A) @ B * self.scaling
-            lora_update = lora_update
+            # LoRA for gate_up - use local indices
+            lora_update = (current_state @ lora_gate_up_A_local[local_expert_idx]) @ \
+                          lora_gate_up_B_local[local_expert_idx] * self.scaling
             
-            gate_up = (current_state @ self.m.gate_up_proj[expert_idx].to_local() + lora_update) + self.m.gate_up_proj_bias[expert_idx].to_local()
+            gate_up = (current_state @ gate_up_proj_local[local_expert_idx] + lora_update) + \
+                      gate_up_bias_local[local_expert_idx]
+            
             gate, up = gate_up[..., ::2], gate_up[..., 1::2]
             gate = gate.clamp(max=self.m.limit)
             up = up.clamp(min=-self.m.limit, max=self.m.limit)
             glu = gate * torch.sigmoid(gate * self.m.alpha)
             gated_output = (up + 1) * glu
             
-            A = self.lora_down_A[expert_idx].to_local()
-            B = self.lora_down_B[expert_idx].to_local()
+            # LoRA for down - use local indices
+            lora_update = (gated_output @ lora_down_A_local[local_expert_idx]) @ \
+                          lora_down_B_local[local_expert_idx] * self.scaling
             
-            lora_update = (gated_output @ A) @ B * self.scaling
+            out = (gated_output @ down_proj_local[local_expert_idx] + lora_update) + \
+                  down_bias_local[local_expert_idx]
             
-            out = (gated_output @ self.m.down_proj[expert_idx].to_local() + lora_update) + self.m.down_proj_bias[expert_idx].to_local()
             weighted_output = out * routing_weights[token_idx, top_k_pos, None]
             next_states.index_add_(0, token_idx, weighted_output.to(hidden_states.dtype))
+        
+        # Single all-reduce at the end
+        dist.all_reduce(next_states, group=self.tp_mesh.get_group())
         
         return next_states.view(batch_size, -1, self.H)
 
@@ -313,7 +354,6 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2.0):
         parameters = list(parameters)
     
     grads = [p.grad for p in parameters if p.grad is not None]
-    print(len(grads))
     
     norms = []
     for grad in grads:
@@ -357,21 +397,21 @@ def main():
         torch.cuda.device_count() if torch.cuda.is_available() else 1
     )
     torch.set_num_threads(num_threads)
-    device_mesh = init_device_mesh(device_type.type, (4, 2), mesh_dim_names=("dp", "tp"))
+    device_mesh = init_device_mesh(device_type.type, (2, 4), mesh_dim_names=("dp", "tp"))
     tp_mesh = device_mesh["tp"]
     dp_mesh = device_mesh["dp"]
     dp_rank = dp_mesh.get_local_rank()
     dp_world_size = dp_mesh.size()
 
     set_seed(42)
-    model_name = "unsloth/gpt-oss-20b-BF16"
+    model_name = "ramdisk/gpt-oss-120b-BF16"
     checkpoint_dir = model_name.replace('/', '-')
     warmup_steps = 50
     learning_rate = 1e-4
     num_epoch = 3
-    dataset = 'multipacking'
+    dataset = 'multipacking-gpt-oss'
     batch_size = 1
-    grad_accumulation = 8
+    grad_accumulation = 16
 
     os.makedirs(checkpoint_dir, exist_ok=True)
     
@@ -392,16 +432,16 @@ def main():
         "o_proj",
     ]
 
-    rank = 256
-    alpha = 512
+    rank_lora = 256
+    alpha_lora = 512
     top_k = model.config.num_experts_per_tok
-    r = rank // top_k
-    alpha = alpha // top_k
+    r = rank_lora // top_k
+    alpha = alpha_lora // top_k
 
     for name, module in model.named_modules():
         for child_name, child in module.named_children():
             if len(child_name) and any([a in child_name for a in selected]) and isinstance(child, nn.Linear):
-                lora = LinearLoRA(child, r=rank, alpha=alpha)
+                lora = LinearLoRA(child, r=rank_lora, alpha=alpha_lora)
                 setattr(module, child_name, lora)
 
             if child_name == 'experts' and isinstance(child, GptOssExperts):
@@ -429,7 +469,7 @@ def main():
         checkpoint_wrapper_fn=non_reentrant_wrapper,
         check_fn=check_fn,
     )
-    model = torch.compile(model)
+    # model = torch.compile(model)
 
     dataset = Dataset(dataset)
     sampler = DistributedSampler(
@@ -448,7 +488,6 @@ def main():
         collate_fn=collator,
     )
     optim = torch.optim.AdamW(model.parameters(), lr=1e-4, foreach=True)
-
     steps_per_epoch = len(train_loader) // grad_accumulation
     total_steps = steps_per_epoch * num_epoch
     scheduler = get_linear_schedule_with_warmup(
@@ -457,33 +496,50 @@ def main():
         num_training_steps=total_steps
     )
 
+    if rank == 0:
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                print(name, param.size(), param.dtype)
+
     step = 0
     pbar = tqdm(total=total_steps, initial=step)
     iter_train_loader = iter(train_loader)
     if rank == 0:
         wandb.init()
     
+    total_global_total_tokens = 0
     while step < total_steps:
         batches = []
+        total_tokens = 0
         for _ in range(grad_accumulation):
             try:
                 batch = next(iter_train_loader)
             except StopIteration:
                 iter_train_loader = iter(loader)
                 batch = next(iter_train_loader)
+            total_tokens += batch['input_ids'].shape[1]
             batches.append(batch)
+
+        token_tensor = torch.tensor([total_tokens], dtype=torch.long, device=device)
+        dp_group = dp_mesh.get_group()
+        dist.all_reduce(token_tensor, op=dist.ReduceOp.SUM, group=dp_group)
+        global_total_tokens = token_tensor.item()
+        total_global_total_tokens += global_total_tokens
         
         torch.cuda.synchronize()
         t0 = time.time()
 
+        loss_sum = 0.0
         for b in batches:
             for k in b.keys():
                 if isinstance(b[k], torch.Tensor):
                     b[k] = b[k].to(device, non_blocking=True)
-                
+            
+            b['num_items_in_batch'] = torch.tensor(global_total_tokens)
             out = model(**b, use_cache=False)
-            loss = out["loss"] / grad_accumulation
+            loss = out["loss"] * dp_world_size
             loss.backward()
+            loss_sum += loss
 
         grad_norm = clip_grad_norm_(model.parameters(), 1.0)
         optim.step()
@@ -494,37 +550,39 @@ def main():
         t1 = time.time()
         dt = t1 - t0
 
-        throughput_per_sec = len(batches) * batch_size * 4096 / dt
+        throughput_per_sec = global_total_tokens / dt
 
-        if (step + 1) % log_interval == 0 and rank == 0:
+        if rank == 0:
             scalar_dict = {
-                "grad_norm": grad_norm,
-                "lr_g": scheduler.get_last_lr()[0],
-                "loss": loss.item() * grad_accumulation,
-                "global_step": step,
-                "throughput_per_sec": throughput_per_sec * world_size,
+                "train/grad_norm": grad_norm,
+                "train/learning_rate": scheduler.get_last_lr()[0],
+                "train/loss": loss_sum,
+                "train/global_step": step,
+                "train/train_tokens_per_second": throughput_per_sec,
+                "train/num_input_tokens_seen": total_global_total_tokens,
             }
             try:
                 wandb.log(scalar_dict)
-            except:
-                pass
+            except Exception as e:
+                print('failed pushed to wandb', e)
 
         if (step + 1) % steps_per_epoch == 0 and rank == 0:
+            print(f'saving checkpoint at {step}')
             sharded_sd = model.state_dict()
             cpu_state_dict = {}
+                
             for param_name, sharded_param in sharded_sd.items():
                 full_param = sharded_param.full_tensor()
-                if torch.distributed.get_rank() == 0:
+                if rank == 0 and '.lora' in param_name:
                     cpu_state_dict[param_name] = full_param.cpu()
                 else:
                     del full_param
             
-            torch.save(cpu_state_dict, f"{checkpoint_dir}/model_state_dict-{step}.pt")
-        
+            if rank == 0:
+                torch.save(cpu_state_dict, os.path.join(checkpoint_dir, f'{step}-model_state_dict.pt'))
+
         step += 1
         pbar.update(1)
-
-        
 
 if __name__ == "__main__":
     main()

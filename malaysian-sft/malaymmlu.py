@@ -347,7 +347,7 @@ def evaluate_model(model: str, port: int, output_dir: str, gpu_id: int, config: 
         evaluator = MalayMMLUEvaluator(server, output_path, config)
         questions = evaluator.load_questions()
         evaluator.run_parallel(questions)
-        evaluator.run_sequential_cleanup(questions)
+        evaluator.run_parallel(questions)
 
     time.sleep(config.inter_model_delay)
 
@@ -359,8 +359,8 @@ def process_batch(args: tuple[list[tuple], int]):
     for model, port, output_dir, done_folder in rows:
         try:
             evaluate_model(model, port, output_dir, gpu_id, config)
-            with open(os.path.join(done_folder, model), 'w') as fopen:
-                json.dump(done, fopen)
+            # with open(os.path.join(done_folder, model), 'w') as fopen:
+            #     json.dump(done, fopen)
         except Exception as e:
             import traceback
             print(f"Error evaluating {model}: {e}")
