@@ -1,6 +1,6 @@
-# FSDP vs HSDP
+# FSDP2 vs HSDP2
 
-Comparing throughput FSDP vs HSDP on Qwen3 14B dense LoRA on all linear layers on the same global batch size.
+Comparing throughput FSDP2 vs HSDP2 on Qwen3 14B dense LoRA on all linear layers on the same global batch size.
 
 ## How to
 
