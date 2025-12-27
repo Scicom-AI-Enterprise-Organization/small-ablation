@@ -4,8 +4,8 @@ LoRA SFT on https://huggingface.co/datasets/Scicom-intl/Malaysian-Instructions
 
 ## Ablation on multiple models
 
-1. Ablation on Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, openai/gpt-oss-120b, 
-2. Dense LoRA SFT done using DeepSpeed Zero3 HF Trainer while MoE LoRA SFT done using ~~FSDP2 + EP~~ FSDP1, check our ablation by comparing throughput FSDP1 vs FSDP2 + EP, https://github.com/Scicom-AI-Enterprise-Organization/small-ablation/tree/main/fsdp1-vs-fsdp2-ep, FSDP1 is faster for single node.
+1. Ablation on Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, openai/gpt-oss-120b, zai-org/GLM-4.5-Air and Qwen/Qwen3-235B-A22B
+2. Dense LoRA SFT done using DeepSpeed Zero3 HF Trainer while MoE LoRA SFT done using FSDP2 + EP except for GPT OSS.
 3. Multipacking variable length 16384 context length, with global batch size of 32, so global total tokens is 524288.
 4. All self attention linear layers with rank 256 with alpha multiply by 2.0 <sup> + </sup>
 5. Liger fused cross entropy.
@@ -30,6 +30,21 @@ We benchmark using https://huggingface.co/datasets/UMxYTLAILabs/MalayMMLU
 
 ```bash
 python3 malaymmlu.py --pattern "ds3-qwen3-32b-lora-256*" --num_gpus 8 --gpu_partition 2
+```
+
+2. Calculate accuracy,
+
+```bash
+python3 calculate_malaymmlu.py --pattern "malaymmlu-ds3-qwen3-32b-lora-256-checkpoint-*"
+```
+
+```
+malaymmlu-ds3-qwen3-32b-lora-256-checkpoint-960 72634
+malaymmlu-ds3-qwen3-32b-lora-256-checkpoint-640 72629
+malaymmlu-ds3-qwen3-32b-lora-256-checkpoint-320 72629
+malaymmlu-ds3-qwen3-32b-lora-256-checkpoint-960 0.7588913214093932 0.8766987483993556
+malaymmlu-ds3-qwen3-32b-lora-256-checkpoint-640 0.7507745693394473 0.8775147684554054
+malaymmlu-ds3-qwen3-32b-lora-256-checkpoint-320 0.7422927514670634 0.8718902388627159
 ```
 
 #### Qwen/Qwen2.5-72B-Instruct
