@@ -8,7 +8,7 @@ torchrun --nproc_per_node 8 --master_port=29502 \
 --model_name_or_path "ramdisk/Qwen3-32B" \
 --per_device_train_batch_size 8 \
 --gradient_accumulation_steps 1 \
---output_dir fsdp1-peft\
+--output_dir fsdp1-peft \
 --bf16 --do_train --do_eval false --max-steps 100 \
 --train_file "multipacking" \
 --logging_steps 1 \

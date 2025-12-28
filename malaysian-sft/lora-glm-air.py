@@ -285,7 +285,7 @@ class LinearLoRA(nn.Module):
         return out
 
 def check_fn(module):
-    return isinstance(module, (Glm4MoeDecoderLayer, Glm4MoeMLP, Glm4MoeMoEExpertParallel))
+    return isinstance(module, (Glm4MoeDecoderLayer, Glm4MoeMoEExpertParallel))
 
 non_reentrant_wrapper = partial(
     checkpoint_wrapper,
@@ -344,7 +344,7 @@ def main():
         torch.cuda.device_count() if torch.cuda.is_available() else 1
     )
     torch.set_num_threads(num_threads)
-    device_mesh = init_device_mesh(device_type.type, (world_size,), mesh_dim_names=("dp",))
+    device_mesh = init_device_mesh(device_type.type, (world_size,), mesh_dim_names=("dp", "ep"))
     tp_mesh = device_mesh["dp"]
     dp_mesh = device_mesh["dp"]
     dp_rank = dp_mesh.get_local_rank()
@@ -352,13 +352,13 @@ def main():
 
     set_seed(42)
     model_name = "ramdisk/GLM-4.5-Air"
-    checkpoint_dir = model_name.replace('/', '-')
+    checkpoint_dir = os.path.join('nfs/nfs', model_name.replace('/', '-'))
     warmup_steps = 50
     learning_rate = 1e-4
     num_epoch = 3
     dataset = 'multipacking-glm'
     batch_size = 2
-    grad_accumulation = 2
+    grad_accumulation = 16
 
     os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -459,16 +459,9 @@ def main():
     # model = torch.compile(model)
 
     dataset = Dataset(dataset)
-    sampler = DistributedSampler(
-        dataset,
-        num_replicas=dp_world_size,
-        rank=dp_rank,
-        shuffle=True,
-    )
     train_loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
-        sampler=sampler,
         num_workers=5,
         prefetch_factor=5,
         pin_memory=True,
@@ -571,7 +564,7 @@ def main():
                 else:
                     del full_param
             
-            torch.save(cpu_state_dict, os.path.join('nfs/nfs', checkpoint_dir, f'{step}-{rank}-model_state_dict.pt'))
+            torch.save(cpu_state_dict, os.path.join(checkpoint_dir, f'{step}-{rank}-model_state_dict.pt'))
 
         step += 1
         pbar.update(1)
