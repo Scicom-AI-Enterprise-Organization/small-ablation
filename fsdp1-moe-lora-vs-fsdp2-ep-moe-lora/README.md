@@ -1,6 +1,6 @@
-# FSDP1 vs FSDP2
+# FSDP1 MoE LoRA vs FSDP2 EP MoE LoRA
 
-Comparing the loss of FSDP1 and HSDP2 when using a Qwen3 32B dense LoRA applied to all linear layers, under the same global batch size.
+Because we build a lot our own FSDP2 EP MoE LORA script, I think we should compare the loss using the FSDP1 Hugging Face Trainer with Qwen3-30B-A3B, applying LoRA to all linear layers including the experts, while keeping the global batch size the same.
 
 ## How to
 
