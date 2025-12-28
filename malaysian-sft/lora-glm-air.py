@@ -502,9 +502,10 @@ def main():
             try:
                 batch = next(iter_train_loader)
             except StopIteration:
-                iter_train_loader = iter(loader)
+                iter_train_loader = iter(train_loader)
                 batch = next(iter_train_loader)
-            total_tokens += batch['input_ids'].shape[1]
+            valid_tokens = (batch['labels'] != -100).sum().item()
+            total_tokens += valid_tokens
             batches.append(batch)
 
         token_tensor = torch.tensor([total_tokens], dtype=torch.long, device=device)
