@@ -177,11 +177,14 @@ class ExpertLoRA(nn.Module):
     
     def forward(self, hidden_states: torch.Tensor, router_indices=None, routing_weights=None):
         batch_size = hidden_states.shape[0]
-        hidden_states = hidden_states.reshape(-1, self.H)
-        next_states = torch.zeros_like(hidden_states)
+        hidden_states = hidden_states.reshape(-1, self.m.hidden_size)
+        num_experts = routing_weights.shape[1]
+        next_states = torch.zeros_like(hidden_states, dtype=hidden_states.dtype, device=hidden_states.device)
         
         with torch.no_grad():
-            expert_mask = F.one_hot(router_indices, num_classes=self.E)
+            expert_mask = torch.nn.functional.one_hot(
+                router_indices, num_classes=num_experts + 1
+            ) 
             expert_mask = expert_mask.permute(2, 1, 0)
             expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
         
@@ -202,7 +205,7 @@ class ExpertLoRA(nn.Module):
                 continue
             
             with torch.no_grad():
-                top_k_pos, token_idx = torch.where(expert_mask[expert_idx])
+                _, token_idx = torch.where(expert_mask[expert_idx])
             
             current_state = hidden_states[token_idx]
             
@@ -214,7 +217,7 @@ class ExpertLoRA(nn.Module):
             
             gate_up = (current_state @ self.m.gate_up_proj[expert_idx] + lora_update) + self.m.gate_up_proj_bias[expert_idx]
             gate, up = gate_up[..., ::2], gate_up[..., 1::2]
-            gate = gate.clamp(max=self.m.limit)
+            gate = gate.clamp(min=None, max=self.m.limit)
             up = up.clamp(min=-self.m.limit, max=self.m.limit)
             glu = gate * torch.sigmoid(gate * self.m.alpha)
             gated_output = (up + 1) * glu
@@ -226,10 +229,10 @@ class ExpertLoRA(nn.Module):
             lora_update2 = lora_update2.to(gated_output.dtype)
             
             out = (gated_output @ self.m.down_proj[expert_idx] + lora_update2) + self.m.down_proj_bias[expert_idx]
-            weighted_output = out * routing_weights[token_idx, top_k_pos, None]
+            weighted_output = out * routing_weights[token_idx, expert_idx, None]
             next_states.index_add_(0, token_idx, weighted_output.to(hidden_states.dtype))
         
-        return next_states.view(batch_size, -1, self.H)
+        return next_states.view(batch_size, -1, self.m.hidden_size)
 
 class LinearLoRA(nn.Module):
     def __init__(self, linear: nn.Linear, r=4, alpha=1.0):

@@ -16,7 +16,7 @@ torchrun --nproc_per_node 2 --master_port=29502 \
 --learning_rate 2e-4 \
 --warmup_steps 50 \
 --weight_decay 0.01 \
---save_steps 2 \
+--save_steps 10000 \
 --save_total_limit 3 \
 --model_dtype bfloat16 \
 --rank 32 \
