@@ -335,7 +335,7 @@ def main():
         torch.cuda.device_count() if torch.cuda.is_available() else 1
     )
     torch.set_num_threads(num_threads)
-    device_mesh = init_device_mesh(device_type.type, (world_size,), mesh_dim_names=("dp", "ep"))
+    device_mesh = init_device_mesh(device_type.type, (world_size,), mesh_dim_names=("dp",))
     tp_mesh = device_mesh["dp"]
     dp_mesh = device_mesh["dp"]
     dp_rank = dp_mesh.get_local_rank()
@@ -349,7 +349,7 @@ def main():
     num_epoch = 3
     dataset = 'multipacking-glm'
     batch_size = 2
-    grad_accumulation = 16
+    grad_accumulation = 1
 
     os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -492,10 +492,7 @@ def main():
             total_tokens += valid_tokens
             batches.append(batch)
 
-        token_tensor = torch.tensor([total_tokens], dtype=torch.long, device=device)
-        dp_group = dp_mesh.get_group()
-        dist.all_reduce(token_tensor, op=dist.ReduceOp.SUM, group=dp_group)
-        global_total_tokens = token_tensor.item()
+        global_total_tokens = total_tokens
         total_global_total_tokens += global_total_tokens
         
         torch.cuda.synchronize()
@@ -509,7 +506,7 @@ def main():
             
             b['num_items_in_batch'] = torch.tensor(global_total_tokens)
             out = model(**b, use_cache=False)
-            loss = out["loss"] * dp_world_size
+            loss = out["loss"]
             loss.backward()
             loss_sum += loss
 

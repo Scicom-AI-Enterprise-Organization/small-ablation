@@ -26,4 +26,4 @@ torchrun --nproc_per_node 2 --master_port=29501 \
 --dataloader_prefetch_factor 4 \
 --include_expert_lora true \
 --save_only_model true \
---specific_layers "3,2,18,1"
+--specific_layers "23,22,21,20"

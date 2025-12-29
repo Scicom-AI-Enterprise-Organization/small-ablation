@@ -1,6 +1,7 @@
 import torch
 
 torch._dynamo.config.capture_scalar_outputs = True
+torch.set_float32_matmul_precision('high')
 
 import os
 import math
@@ -25,14 +26,14 @@ from transformers import (
     get_linear_schedule_with_warmup,
     AutoConfig,
     AutoTokenizer,
-    Qwen3MoeForCausalLM,
+    Glm4MoeForCausalLM,
 )
-from transformers.models.qwen3_moe.modeling_qwen3_moe import (
-    Qwen3MoeMLP,
-    Qwen3MoeDecoderLayer,
-    Qwen3MoeTopKRouter,
+from transformers.models.glm4_moe.modeling_glm4_moe import (
+    Glm4MoeMLP,
+    Glm4MoeDecoderLayer,
+    Glm4MoeTopkRouter,
 )
-from transformers.models.qwen3_moe import modeling_qwen3_moe
+from transformers.models.glm4_moe import modeling_glm4_moe
 from liger_kernel.transformers import LigerFusedLinearCrossEntropyLoss
 from streaming import LocalDataset
 from streaming.base.format.mds.encodings import Encoding, _encodings
@@ -50,9 +51,8 @@ class UInt32(Encoding):
 _encodings['uint32'] = UInt32
 
 class Dataset(Dataset):
-    def __init__(self, folder, sequence_length=16384):
+    def __init__(self, folder):
         self.dataset = LocalDataset(local=folder)
-        self.sequence_length = sequence_length
     
     def __getitem__(self, idx):
         data = self.dataset[idx]
@@ -64,14 +64,6 @@ class Dataset(Dataset):
             data[k] = data[k].astype(np.int64)
 
         data['labels'] = data['input_ids'].copy()
-        attention_mask_sum = data['attention_mask'].sum()
-        
-        if attention_mask_sum < self.sequence_length:
-            balance = self.sequence_length - attention_mask_sum
-            data['input_ids'] = np.concatenate([data['input_ids'], np.array([151329] * balance)])
-            data['position_ids'] = np.concatenate([data['position_ids'], np.array([0] * balance)])
-            data['labels'] = np.concatenate([data['labels'], np.array([-100] * balance)])
-            data['attention_mask'] = np.concatenate([data['attention_mask'], np.array([balance])])
     
         return data
     
@@ -103,7 +95,7 @@ def collator(batch):
         'max_length_k': max_seqlen_q
     }
 
-class Model(Qwen3MoeForCausalLM):
+class Model(Glm4MoeForCausalLM):
     def __init__(self, config):
         super().__init__(config)
         self.loss = LigerFusedLinearCrossEntropyLoss(reduction="sum")
@@ -141,30 +133,33 @@ class Model(Qwen3MoeForCausalLM):
             return {'loss': loss}
         return super_out
 
-class Qwen3MoeSparseMoeBlockParallel(nn.Module):
+class Glm4MoeMoEExpertParallel(nn.Module):
+
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.device_mesh = config.device_mesh
+        self.device_mesh = self.config.device_mesh
         self.world_size = self.device_mesh.size()
         self.rank = self.device_mesh.get_local_rank()
         
-        self.num_experts = config.num_experts
-        self.total_experts = config.num_experts
-        self.top_k = config.num_experts_per_tok
-        self.norm_topk_prob = config.norm_topk_prob
-        
+        self.total_experts = config.n_routed_experts
         self.experts_per_rank = self.total_experts // self.world_size
         assert self.total_experts % self.world_size == 0, \
-            f"num_experts ({self.total_experts}) must be divisible by world_size ({self.world_size})"
+            f"n_routed_experts ({self.total_experts}) must be divisible by world_size ({self.world_size})"
         
         self.local_expert_start = self.rank * self.experts_per_rank
         self.local_expert_end = (self.rank + 1) * self.experts_per_rank
         self._is_sharded = False
 
-        self.gate = nn.Linear(config.hidden_size, config.num_experts, bias=False)
         self.experts = nn.ModuleList(
-            [Qwen3MoeMLP(config, intermediate_size=config.moe_intermediate_size) for _ in range(self.num_experts)]
+            [
+                Glm4MoeMLP(config, intermediate_size=config.moe_intermediate_size)
+                for _ in range(config.n_routed_experts)
+            ]
+        )
+        self.gate = Glm4MoeTopkRouter(config)
+        self.shared_experts = Glm4MoeMLP(
+            config=config, intermediate_size=config.moe_intermediate_size * config.n_shared_experts
         )
 
     def shard_experts(self):
@@ -179,18 +174,17 @@ class Qwen3MoeSparseMoeBlockParallel(nn.Module):
         self.experts = local_experts
         self._is_sharded = True
 
-    def moe(self, hidden_states: torch.Tensor, selected_experts: torch.Tensor, routing_weights: torch.Tensor):
+    def moe(self, hidden_states: torch.Tensor, topk_indices: torch.Tensor, topk_weights: torch.Tensor):
         if self._is_sharded:
-            return self._moe_sharded(hidden_states, selected_experts, routing_weights)
+            return self._moe_sharded(hidden_states, topk_indices, topk_weights)
         else:
-            return self._moe_local(hidden_states, selected_experts, routing_weights)
-
-    def _moe_local(self, hidden_states: torch.Tensor, selected_experts: torch.Tensor, routing_weights: torch.Tensor):
-        batch_seq_len, hidden_dim = hidden_states.shape
+            return self._moe_local(hidden_states, topk_indices, topk_weights)
+    
+    def _moe_local(self, hidden_states: torch.Tensor, topk_indices: torch.Tensor, topk_weights: torch.Tensor):
         final_hidden_states = torch.zeros_like(hidden_states, dtype=hidden_states.dtype)
-        
+    
         num_experts = len(self.experts)
-        expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes=num_experts).permute(2, 1, 0)
+        expert_mask = torch.nn.functional.one_hot(topk_indices, num_classes=num_experts).permute(2, 1, 0)
 
         for expert_idx in range(num_experts):
             expert_layer = self.experts[expert_idx]
@@ -198,19 +192,18 @@ class Qwen3MoeSparseMoeBlockParallel(nn.Module):
             
             if top_x.numel() > 0:
                 current_state = hidden_states[top_x]
-                current_hidden_states = expert_layer(current_state) * routing_weights[top_x, idx, None]
+                current_hidden_states = expert_layer(current_state) * topk_weights[top_x, idx, None]
                 final_hidden_states.index_add_(0, top_x, current_hidden_states.to(hidden_states.dtype))
             else:
-                # Dummy forward to ensure all expert parameters are in compute graph
                 dummy = expert_layer(hidden_states[:1]) * 0
                 final_hidden_states = final_hidden_states + dummy.sum() * 0
         
-        return final_hidden_states
-
-    def _moe_sharded(self, hidden_states: torch.Tensor, selected_experts: torch.Tensor, routing_weights: torch.Tensor):
+        return final_hidden_states.type(hidden_states.dtype)
+    
+    def _moe_sharded(self, hidden_states: torch.Tensor, topk_indices: torch.Tensor, topk_weights: torch.Tensor):
         final_hidden_states = torch.zeros_like(hidden_states, dtype=hidden_states.dtype)
         
-        expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes=self.total_experts).permute(2, 1, 0)
+        expert_mask = torch.nn.functional.one_hot(topk_indices, num_classes=self.total_experts).permute(2, 1, 0)
         
         for local_expert_idx in range(self.experts_per_rank):
             global_expert_idx = self.local_expert_start + local_expert_idx
@@ -220,36 +213,25 @@ class Qwen3MoeSparseMoeBlockParallel(nn.Module):
             
             if top_x.numel() > 0:
                 current_state = hidden_states[top_x]
-                current_hidden_states = expert_layer(current_state) * routing_weights[top_x, idx, None]
+                current_hidden_states = expert_layer(current_state) * topk_weights[top_x, idx, None]
                 final_hidden_states.index_add_(0, top_x, current_hidden_states.to(hidden_states.dtype))
             else:
-                # Dummy forward to ensure all expert parameters are in compute graph
                 dummy = expert_layer(hidden_states[:1]) * 0
                 final_hidden_states = final_hidden_states + dummy.sum() * 0
                 
         torch.distributed.all_reduce(final_hidden_states, group=self.device_mesh.get_group())
-        return final_hidden_states
+        return final_hidden_states.type(hidden_states.dtype)
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        batch_size, sequence_length, hidden_dim = hidden_states.shape
-        hidden_states = hidden_states.view(-1, hidden_dim)
-        
-        router_logits = self.gate(hidden_states)
+    def forward(self, hidden_states):
+        residuals = hidden_states
+        orig_shape = hidden_states.shape
+        topk_indices, topk_weights = self.gate(hidden_states)
+        hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
+        hidden_states = self.moe(hidden_states, topk_indices, topk_weights).view(*orig_shape)
+        hidden_states = hidden_states + self.shared_experts(residuals)
+        return hidden_states
 
-        routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
-        routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
-        
-        if self.norm_topk_prob:
-            routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
-        
-        routing_weights = routing_weights.to(hidden_states.dtype)
-
-        final_hidden_states = self.moe(hidden_states, selected_experts, routing_weights)
-        
-        final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
-        return final_hidden_states, router_logits
-
-modeling_qwen3_moe.Qwen3MoeSparseMoeBlock = Qwen3MoeSparseMoeBlockParallel
+modeling_glm4_moe.Glm4MoeMoE = Glm4MoeMoEExpertParallel
 
 class LinearLoRA(nn.Module):
     def __init__(self, linear: nn.Linear, r=4, alpha=1.0):
@@ -295,7 +277,7 @@ class LinearLoRA(nn.Module):
         return out
 
 def check_fn(module):
-    return isinstance(module, (Qwen3MoeDecoderLayer, Qwen3MoeMLP, Qwen3MoeSparseMoeBlockParallel))
+    return isinstance(module, (Glm4MoeDecoderLayer, Glm4MoeMoEExpertParallel))
 
 non_reentrant_wrapper = partial(
     checkpoint_wrapper,
@@ -361,16 +343,13 @@ def main():
     dp_world_size = dp_mesh.size()
 
     set_seed(42)
-    model_name = "ramdisk/Qwen3-235B-A22B-Instruct-2507"
-    checkpoint_dir = model_name.replace('/', '-')
-    warmup_steps = 50
+    model_name = "ramdisk/GLM-4.5-Air"
+    warmup_steps = 10
     learning_rate = 1e-4
-    num_epoch = 3
-    dataset = 'multipacking-qwen3'
+    total_steps = 50
+    dataset = 'multipacking-glm'
     batch_size = 2
-    grad_accumulation = 2
-
-    os.makedirs(checkpoint_dir, exist_ok=True)
+    grad_accumulation = 8
 
     config = AutoConfig.from_pretrained(model_name)
     config.device_mesh = tp_mesh
@@ -383,7 +362,7 @@ def main():
     )
 
     for module in model.modules():
-        if isinstance(module, Qwen3MoeSparseMoeBlockParallel):
+        if isinstance(module, Glm4MoeMoEExpertParallel):
             module.shard_experts()
 
     for name, param in model.named_parameters():
@@ -469,16 +448,9 @@ def main():
     # model = torch.compile(model)
 
     dataset = Dataset(dataset)
-    sampler = DistributedSampler(
-        dataset,
-        num_replicas=dp_world_size,
-        rank=dp_rank,
-        shuffle=True,
-    )
     train_loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
-        sampler=sampler,
         num_workers=5,
         prefetch_factor=5,
         pin_memory=True,
@@ -486,7 +458,6 @@ def main():
     )
     optim = torch.optim.AdamW(model.parameters(), lr=1e-4, foreach=True)
     steps_per_epoch = len(train_loader) // grad_accumulation
-    total_steps = steps_per_epoch * num_epoch
     scheduler = get_linear_schedule_with_warmup(
         optim, 
         warmup_steps, 
@@ -518,10 +489,7 @@ def main():
             total_tokens += valid_tokens
             batches.append(batch)
 
-        token_tensor = torch.tensor([total_tokens], dtype=torch.long, device=device)
-        dp_group = dp_mesh.get_group()
-        dist.all_reduce(token_tensor, op=dist.ReduceOp.SUM, group=dp_group)
-        global_total_tokens = token_tensor.item()
+        global_total_tokens = total_tokens
         total_global_total_tokens += global_total_tokens
         
         torch.cuda.synchronize()
@@ -535,7 +503,7 @@ def main():
             
             b['num_items_in_batch'] = torch.tensor(global_total_tokens)
             out = model(**b, use_cache=False)
-            loss = out["loss"] * dp_world_size
+            loss = out["loss"]
             loss.backward()
             loss_sum += loss
 
@@ -564,24 +532,6 @@ def main():
                 wandb.log(scalar_dict)
             except Exception as e:
                 print('failed pushed to wandb', e)
-
-        if (step + 1) % steps_per_epoch == 0:
-            print(f'saving checkpoint at {step}')
-            sharded_sd = model.state_dict()
-            cpu_state_dict = {}
-            
-            for param_name, sharded_param in sharded_sd.items():
-                try:
-                    full_param = sharded_param.full_tensor()
-                except:
-                    full_param = sharded_param
-                    
-                if '.lora' in param_name:
-                    cpu_state_dict[param_name] = full_param.cpu()
-                else:
-                    del full_param
-            
-            torch.save(cpu_state_dict, os.path.join('nfs/nfs', checkpoint_dir, f'{step}-{rank}-model_state_dict.pt'))
 
         step += 1
         pbar.update(1)

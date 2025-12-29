@@ -8,7 +8,7 @@ LoRA SFT on https://huggingface.co/datasets/mesolitica/Malaysian-Reasoning
 2. Multipacking variable length 16384 context length, with global batch size of 8, so global total tokens is 65536.
 3. All self attention linear layers with rank 16, 32, 64, 128, 256, 512 with alpha multiply by 2.0
 4. All expert gate up projection and down projection with rank 16, 32, 64, 128, 256, 512 with alpha multiply by 2.0 <sup> + </sup>
-5. Selected expert gate up projection and down projection based on square root mean `exp_avg_sq`, [20b-r64-experts-gradient.sh](20b-r64-experts-gradient.sh), [notebook/sort-optimizer.ipynb](notebook/sort-optimizer.ipynb), top 4 selected layers are 3, 2, 18, and 1. <sup> + </sup>
+5. Selected expert gate up projection and down projection based on square root mean `exp_avg_sq`, [20b-r64-experts-gradient.sh](20b-r64-experts-gradient.sh), [notebook/sort-optimizer.ipynb](notebook/sort-optimizer.ipynb), top 4 selected layers are 23, 22, 21, 20. <sup> + </sup>
 6. Liger fused cross entropy.
 7. 2e-4 learning rate, 50 warmup, 2 epoch only.
 

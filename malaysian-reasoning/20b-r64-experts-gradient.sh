@@ -1,7 +1,7 @@
-CUDA_VISIBLE_DEVICES="2,3" \
+CUDA_VISIBLE_DEVICES="4,5" \
 WANDB_DISABLED="true" \
 TORCH_DISTRIBUTED_DEBUG="info" \
-torchrun --nproc_per_node 2 --master_port=29503 \
+torchrun --nproc_per_node 2 --master_port=29505 \
 -m openai-oss-sft-lora \
 --fsdp "full_shard auto_wrap" \
 --fsdp_config fsdp.json \

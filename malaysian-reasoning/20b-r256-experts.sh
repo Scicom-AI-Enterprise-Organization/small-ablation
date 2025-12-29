@@ -2,7 +2,7 @@ CUDA_VISIBLE_DEVICES="2,3" \
 WANDB_PROJECT="malaysian-reasoning-20b" \
 WANDB_NAME="lora-r256-experts" \
 TORCH_DISTRIBUTED_DEBUG="info" \
-torchrun --nproc_per_node 2 --master_port=29503 \
+torchrun --nproc_per_node 2 --master_port=29502 \
 -m openai-oss-sft-lora \
 --fsdp "full_shard auto_wrap" \
 --fsdp_config fsdp.json \
