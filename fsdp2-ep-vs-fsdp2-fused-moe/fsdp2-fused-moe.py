@@ -2,6 +2,7 @@
 import torch
 
 torch._dynamo.config.capture_scalar_outputs = True
+torch.set_float32_matmul_precision('high')
 
 import os
 import math
