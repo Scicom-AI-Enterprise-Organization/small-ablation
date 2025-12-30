@@ -5,9 +5,9 @@ torchrun --nproc_per_node 8 --master_port=29505 \
 -m openai-oss-sft-lora \
 --fsdp "full_shard auto_wrap" \
 --fsdp_config fsdp.json \
---model_name_or_path openai/gpt-oss-120b \
---per_device_train_batch_size 2 \
---gradient_accumulation_steps 2 \
+--model_name_or_path ramdisk/gpt-oss-120b-BF16 \
+--per_device_train_batch_size 1 \
+--gradient_accumulation_steps 4 \
 --output_dir malaysian-reasoning-120b-lora-r256-experts \
 --bf16 --do_train --do_eval false --num_train_epochs 2 \
 --train_file "malaysian-reasoning-16k-mosaic" \

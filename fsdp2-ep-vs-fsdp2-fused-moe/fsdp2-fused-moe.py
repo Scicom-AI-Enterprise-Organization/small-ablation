@@ -1,3 +1,4 @@
+
 import torch
 
 torch._dynamo.config.capture_scalar_outputs = True
@@ -31,6 +32,7 @@ from transformers.models.glm4_moe.modeling_glm4_moe import (
     Glm4MoeMLP,
     Glm4MoeDecoderLayer,
     Glm4MoeTopkRouter,
+    ACT2FN,
 )
 from transformers.models.glm4_moe import modeling_glm4_moe
 from liger_kernel.transformers import LigerFusedLinearCrossEntropyLoss
@@ -141,10 +143,20 @@ class Model(Glm4MoeForCausalLM):
             return {'loss': loss}
         return super_out
 
+class ExpertLoRAWeights(nn.Module):
+    """Wrapper to make expert LoRA weights more FSDP-friendly"""
+    def __init__(self, num_experts, in_dim, out_dim, r, dtype=torch.bfloat16):
+        super().__init__()
+        self.A = nn.Parameter(torch.zeros(num_experts, in_dim, r, dtype=dtype))
+        self.B = nn.Parameter(torch.zeros(num_experts, r, out_dim, dtype=dtype))
+        
+        with torch.no_grad():
+            init.kaiming_uniform_(self.A, a=math.sqrt(5))
+            
 class Glm4MoeMoEExpertParallel(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.num_experts = config.num_experts
+        self.num_experts = config.n_routed_experts
         self.top_k = config.num_experts_per_tok
         self.norm_topk_prob = config.norm_topk_prob
 
@@ -158,6 +170,9 @@ class Glm4MoeMoEExpertParallel(nn.Module):
         self.shared_experts = Glm4MoeMLP(
             config=config, intermediate_size=config.moe_intermediate_size * config.n_shared_experts
         )
+        self.gate_lora = None
+        self.up_lora = None
+        self.down_lora = None
     
     def apply_lora_stack(self, r, alpha):
         if self._is_stacked:
@@ -165,27 +180,24 @@ class Glm4MoeMoEExpertParallel(nn.Module):
 
         self.r = r
         self.alpha = alpha
+        self.alpha = alpha / r
         
         self._is_stacked = True
 
-        self.gate_proj_lora_A = nn.Parameter(torch.zeros(self.num_experts, self.gate_proj.shape[1], r, dtype=torch.float32))
-        self.gate_proj_lora_B = nn.Parameter(torch.zeros(self.num_experts, r, self.gate_proj.shape[2], dtype=torch.float32))
-        
-        self.up_proj_lora_A = nn.Parameter(torch.zeros(self.num_experts, self.up_proj.shape[1], r, dtype=torch.float32))
-        self.up_proj_lora_B = nn.Parameter(torch.zeros(self.num_experts, r, self.up_proj.shape[2], dtype=torch.float32))
-
-        self.down_proj_lora_A = nn.Parameter(torch.zeros(self.num_experts, self.down_proj.shape[1], r, dtype=torch.float32))
-        self.down_proj_lora_B = nn.Parameter(torch.zeros(self.num_experts, r, self.down_proj.shape[2], dtype=torch.float32))
-
-        with torch.no_grad():
-            # https://github.com/huggingface/peft/blob/main/src/peft/tuners/lora/layer.py#L260
-            init.kaiming_uniform_(self.gate_proj_lora_A, a=math.sqrt(5))
-            init.kaiming_uniform_(self.up_proj_lora_A, a=math.sqrt(5))
-            init.kaiming_uniform_(self.down_proj_lora_A, a=math.sqrt(5))
+        self.gate_lora = ExpertLoRAWeights(
+            self.num_experts, self.gate_proj.shape[1], self.gate_proj.shape[2], r
+        )
+        self.up_lora = ExpertLoRAWeights(
+            self.num_experts, self.up_proj.shape[1], self.up_proj.shape[2], r
+        )
+        self.down_lora = ExpertLoRAWeights(
+            self.num_experts, self.down_proj.shape[1], self.down_proj.shape[2], r
+        )
 
     def moe(self, hidden_states: torch.Tensor, topk_indices: torch.Tensor, topk_weights: torch.Tensor):
         inputs = hidden_states
         M = hidden_states.shape[0]
+        hidden_dim = hidden_states.shape[-1]
 
         sort_indices = topk_indices.view(-1).argsort()  # (M * topk,)
         sorted_pos = sort_indices // self.top_k
@@ -199,59 +211,63 @@ class Glm4MoeMoEExpertParallel(nn.Module):
             self.gate_proj,
             cu_experts_count,
         )
-        gate_out_lora_A = torch._grouped_mm(
-            grouped_inputs,
-            self.gate_proj_lora_A,
-            cu_experts_count,
-        )
-        gate_out_lora_B = torch._grouped_mm(
-            gate_out_lora_A,
-            self.gate_proj_lora_B,
-            cu_experts_count,
-        )
-        gate_out = gate_out + gate_out_lora_B * self.alpha
-
+        if self.gate_lora is not None:
+            gate_out_lora_A = torch._grouped_mm(
+                grouped_inputs,
+                self.gate_lora.A,
+                cu_experts_count,
+            )
+            gate_out_lora_B = torch._grouped_mm(
+                gate_out_lora_A,
+                self.gate_lora.B,
+                cu_experts_count,
+            )
+            gate_out = gate_out + gate_out_lora_B * self.alpha
+        
         up_out = torch._grouped_mm(
             grouped_inputs,
             self.up_proj,
             cu_experts_count,
         )
-        up_out_lora_A = torch._grouped_mm(
-            grouped_inputs,
-            self.up_proj_lora_A,
-            cu_experts_count,
-        )
-        up_out_lora_B = torch._grouped_mm(
-            up_out_lora_A,
-            self.up_proj_lora_B,
-            cu_experts_count,
-        )
-        up_out = up_out + up_out_lora_B * self.apha
+        if self.up_lora is not None:
+            up_out_lora_A = torch._grouped_mm(
+                grouped_inputs,
+                self.up_lora.A,
+                cu_experts_count,
+            )
+            up_out_lora_B = torch._grouped_mm(
+                up_out_lora_A,
+                self.up_lora.B,
+                cu_experts_count,
+            )
+            up_out = up_out + up_out_lora_B * self.alpha
 
         intermediate = self.act_fn(gate_out) * up_out
-
+        
         down_out = torch._grouped_mm(
             intermediate,
             self.down_proj,
             cu_experts_count,
         )
-        down_out_lora_A = torch._grouped_mm(
-            intermediate,
-            self.down_proj_lora_A,
-            cu_experts_count,
-        )
-        down_out_lora_B = torch._grouped_mm(
-            down_out_lora_A,
-            self.down_proj_lora_B,
-            cu_experts_count,
-        )
-        down_out = down_out + down_out_lora_B * self.apha
+
+        if self.down_lora is not None:
+            down_out_lora_A = torch._grouped_mm(
+                intermediate,
+                self.down_lora.A,
+                cu_experts_count,
+            )
+            down_out_lora_B = torch._grouped_mm(
+                down_out_lora_A,
+                self.down_lora.B,
+                cu_experts_count,
+            )
+            down_out = down_out + down_out_lora_B * self.alpha
 
         down_out = down_out * topk_weights.view(-1)[sort_indices].unsqueeze(-1)
 
         outputs = inputs.new_zeros(M, hidden_dim)
         sorted_pos_expanded = sorted_pos.unsqueeze(-1).expand(-1, hidden_dim)
-        outputs.scatter_add_(0, sorted_pos_expanded, down_out)
+        outputs.scatter_add_(0, sorted_pos_expanded, down_out.to(outputs.dtype))
 
         return outputs
     
@@ -270,45 +286,23 @@ class LinearLoRA(nn.Module):
     def __init__(self, linear: nn.Linear, r=4, alpha=1.0):
         super().__init__()
         self.linear = linear
-        self.r = r
-        self.alpha = alpha
         self.scaling = alpha / r
 
         in_features = linear.in_features
         out_features = linear.out_features
         
-        device = self.linear.weight.device
-        dtype = self.linear.weight.dtype
-
-        self.lora_A = nn.ModuleDict({})
-        self.lora_B = nn.ModuleDict({})
+        self.lora_A = nn.Parameter(torch.zeros(r, in_features, dtype=torch.bfloat16))
+        self.lora_B = nn.Parameter(torch.zeros(out_features, r, dtype=torch.bfloat16))
         
-        self.lora_A['e'] = nn.Linear(
-            in_features, r, bias=False, 
-            device = device,
-            dtype = torch.float32,
-        )
-        self.lora_B['e'] = nn.Linear(
-            r, out_features, bias=False, 
-            device = device,
-            dtype = torch.float32,
-        )
-
-        for param in self.lora_A['e'].parameters():
-            param.requires_grad = True
-        for param in self.lora_B['e'].parameters():
-            param.requires_grad = True
-
-        # https://github.com/huggingface/peft/blob/main/src/peft/tuners/lora/layer.py#L260
-        init.kaiming_uniform_(self.lora_A['e'].weight, a=math.sqrt(5))
-        init.zeros_(self.lora_B['e'].weight)
+        with torch.no_grad():
+            init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+            # lora_B stays zero
 
     def forward(self, x):
         out = self.linear(x)
-        lora_update = self.lora_B['e'](self.lora_A['e'](x.to(self.lora_A['e'].weight.dtype))) * self.scaling
-        out = out + lora_update.to(x.dtype)
-        return out
-
+        lora_out = F.linear(F.linear(x.to(self.lora_A.dtype), self.lora_A), self.lora_B) * self.scaling
+        return out + lora_out.to(out.dtype)
+        
 def check_fn(module):
     return isinstance(module, (Glm4MoeDecoderLayer, Glm4MoeMoEExpertParallel))
 
@@ -316,43 +310,6 @@ non_reentrant_wrapper = partial(
     checkpoint_wrapper,
     checkpoint_impl=CheckpointImpl.NO_REENTRANT,
 )
-
-@torch.no_grad()
-def clip_grad_norm_(parameters, max_norm, norm_type=2.0):
-    if isinstance(parameters, torch.Tensor):
-        parameters = [parameters]
-    else:
-        parameters = list(parameters)
-    
-    grads = [p.grad for p in parameters if p.grad is not None]
-    
-    norms = []
-    for grad in grads:
-        if hasattr(grad, 'full_tensor'):  # DTensor
-            grad_full = grad.full_tensor()
-        else:
-            grad_full = grad
-        
-        if norm_type == float('inf'):
-            norms.append(grad_full.abs().max())
-        else:
-            norms.append(grad_full.norm(norm_type))
-    
-    if len(norms) == 0:
-        return torch.tensor(0.0)
-    
-    total_norm = torch.stack(norms).norm(norm_type)
-    
-    clip_coef = max_norm / (total_norm + 1e-6)
-    clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
-    
-    for grad in grads:
-        if hasattr(grad, 'full_tensor'):  # DTensor
-            grad.mul_(clip_coef_clamped)
-        else:
-            grad.mul_(clip_coef_clamped)
-    
-    return total_norm
 
 def main():
     rank = int(os.environ["LOCAL_RANK"])
@@ -375,13 +332,13 @@ def main():
     dp_world_size = dp_mesh.size()
 
     set_seed(42)
-    model_name = "ramdisk/GLM-4.5-Air"
+    model_name = "nfs/nfs/GLM-4.5-Air"
     warmup_steps = 10
     learning_rate = 1e-4
     total_steps = 50
     dataset = 'multipacking-glm'
-    batch_size = 2
-    grad_accumulation = 8
+    batch_size = 1
+    grad_accumulation = 2
     
     model = Model.from_pretrained(
         model_name, 
@@ -405,33 +362,23 @@ def main():
     rank_lora = 256
     alpha_lora = 512
 
-    for name, module in model.named_modules():
+    for name, module in tqdm(model.named_modules()):
         for child_name, child in module.named_children():
             if len(child_name) and any([a in child_name for a in selected]) and isinstance(child, nn.Linear):
                 
                 if 'mlp.experts' in name:
                     continue
-
+    
                 lora = LinearLoRA(child, r=rank_lora, alpha=alpha_lora)
                 setattr(module, child_name, lora)
     
     top_k = model.config.num_experts_per_tok
     r = rank_lora // top_k
     alpha = alpha_lora // top_k
-
-    for module in model.modules():
-        if isinstance(module, Qwen3MoeSparseMoeBlockParallel):
+    
+    for module in tqdm(model.modules()):
+        if isinstance(module, Glm4MoeMoEExpertParallel):
             module.apply_lora_stack(r=r, alpha=alpha)
-
-    lora_mp_policy = MixedPrecisionPolicy(
-        param_dtype=torch.float32,
-        reduce_dtype=torch.float32,
-    )
-
-    for name, module in model.named_modules():
-        for child_name, child in module.named_children():
-            if '.lora' in name:
-                fully_shard(child, mp_policy=lora_mp_policy)
 
     fsdp_kwargs = {}
     fsdp_kwargs["mp_policy"] = MixedPrecisionPolicy(
@@ -439,9 +386,8 @@ def main():
         reduce_dtype=torch.float32,
     )
     fsdp_kwargs["mesh"] = dp_mesh
-    fsdp_kwargs["ignored_params"] = ignored_params
 
-    for module in model.modules():
+    for module in tqdm(model.modules()):
         if isinstance(module, Glm4MoeDecoderLayer):
             fully_shard(module, **fsdp_kwargs)
     fully_shard(model, **fsdp_kwargs)
@@ -451,7 +397,7 @@ def main():
         checkpoint_wrapper_fn=non_reentrant_wrapper,
         check_fn=check_fn,
     )
-    # model = torch.compile(model)
+    model = torch.compile(model)
 
     dataset = Dataset(dataset)
     sampler = DistributedSampler(
@@ -469,18 +415,13 @@ def main():
         pin_memory=True,
         collate_fn=collator,
     )
-    optim = torch.optim.AdamW(model.parameters(), lr=1e-4, foreach=True)
+    optim = torch.optim.AdamW(model.parameters(), lr=1e-4, fused=True, weight_decay=0.01)
 
     scheduler = get_linear_schedule_with_warmup(
         optim, 
         warmup_steps, 
         num_training_steps=total_steps
     )
-
-    if rank == 0:
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                print(name, param.size(), param.dtype)
 
     step = 0
     pbar = tqdm(total=total_steps, initial=step)
@@ -523,7 +464,7 @@ def main():
             loss.backward()
             loss_sum += loss
 
-        grad_norm = clip_grad_norm_(model.parameters(), 1.0)
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optim.step()
         scheduler.step()
         optim.zero_grad()

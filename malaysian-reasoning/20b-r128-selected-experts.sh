@@ -1,8 +1,8 @@
-CUDA_VISIBLE_DEVICES="4,5" \
+CUDA_VISIBLE_DEVICES="2,3" \
 WANDB_PROJECT="malaysian-reasoning-20b" \
 WANDB_NAME="lora-r128-selected-experts" \
 TORCH_DISTRIBUTED_DEBUG="info" \
-torchrun --nproc_per_node 2 --master_port=29503 \
+torchrun --nproc_per_node 2 --master_port=29501 \
 -m openai-oss-sft-lora \
 --fsdp "full_shard auto_wrap" \
 --fsdp_config fsdp.json \
@@ -26,4 +26,4 @@ torchrun --nproc_per_node 2 --master_port=29503 \
 --dataloader_prefetch_factor 4 \
 --include_expert_lora true \
 --save_only_model true \
---specific_layers "3,2,18,1"
+--specific_layers "23,22,21,20"
