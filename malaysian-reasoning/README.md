@@ -44,18 +44,106 @@ python3 calculate_malaymmlu.py --pattern 'malaymmlu-malaysian-reasoning-20b*'
 ```
 
 ```
-malaymmlu-malaysian-reasoning-20b-lora-r512-experts-merged 0.4944662805130327 0.7711522548613984
-malaymmlu-malaysian-reasoning-20b-lora-r128-experts-merged 0.4516388871677303 0.6049941136377719
-malaymmlu-malaysian-reasoning-20b-lora-r128-merged 0.6151082108045597 0.8538741120105733
-malaymmlu-malaysian-reasoning-20b-lora-r32-selected-experts-merged 0.5944926922262233 0.8365600508366872
-malaymmlu-malaysian-reasoning-20b-lora-r128-selected-experts-merged 0.6058979018668429 0.8409053361969271
-malaymmlu-malaysian-reasoning-20b-lora-r64-selected-experts-merged 0.598135874067937 0.8254349627174814
-malaymmlu-malaysian-reasoning-20b-lora-r256-selected-experts-merged 0.6237604510985806 0.829088080886642
-malaymmlu-malaysian-reasoning-20b-lora-r256-experts-merged 0.4916788779568767 0.7169771823320076
-malaymmlu-malaysian-reasoning-20b-lora-r512-selected-experts-merged 0.608107538662509 0.8249968395769247
-malaymmlu-malaysian-reasoning-20b-lora-r16-experts-merged 0.43287707291392474 0.6925068000350969
-malaymmlu-malaysian-reasoning-20b-lora-r16-selected-experts-merged 0.6015023818248443 0.8407230975937462
-malaymmlu-malaysian-reasoning-20b-lora-r32-experts-merged 0.4361610599673062 0.6942269637787146
+malaymmlu-malaysian-reasoning-20b-lora-r512-experts-merged 72639
+malaymmlu-malaysian-reasoning-20b-lora-r128-experts-merged 72639
+malaymmlu-malaysian-reasoning-20b-lora-r32-selected-experts-merged 72638
+malaymmlu-malaysian-reasoning-20b-lora-r128-selected-experts-merged 72639
+malaymmlu-malaysian-reasoning-20b-lora-r64-selected-experts-merged 72639
+malaymmlu-malaysian-reasoning-20b-lora-r256-selected-experts-merged 72639
+malaymmlu-malaysian-reasoning-20b-lora-r256-experts-merged 72639
+malaymmlu-malaysian-reasoning-20b-lora-r512-selected-experts-merged 72639
+malaymmlu-malaysian-reasoning-20b-lora-r16-experts-merged 72639
+malaymmlu-malaysian-reasoning-20b-lora-r16-selected-experts-merged 72638
+malaymmlu-malaysian-reasoning-20b-lora-r32-experts-merged 72639
+malaymmlu-malaysian-reasoning-20b-lora-r64-experts-merged 72639
+
+malaymmlu-malaysian-reasoning-20b-lora-r512-experts-merged
+STEM 0.7118297175603766 0.8862054850593533
+Language 0.6612595419847328 0.8646628498727735
+Social science 0.6019080659150043 0.8301532234749928
+Others 0.6483569201247301 0.8685536099784121
+Humanities 0.6532423208191126 0.8687144482366326
+average 0.6553193132807913 0.8636579233244328
+
+malaymmlu-malaysian-reasoning-20b-lora-r128-experts-merged
+STEM 0.7040523945968072 0.8878428162095784
+Language 0.6568066157760815 0.8573473282442748
+Social science 0.6013298641225788 0.83506793871061
+Others 0.6344447109618614 0.8534420724394339
+Humanities 0.6637087599544937 0.8787258248009101
+average 0.6520684690823646 0.8624851960809614
+
+malaymmlu-malaysian-reasoning-20b-lora-r32-selected-experts-merged
+STEM 0.6852230863692181 0.8796561604584527
+Language 0.6339058524173028 0.8486005089058524
+Social science 0.5799363978028332 0.8223474992772477
+Others 0.6111777404653395 0.8527224754137683
+Humanities 0.6147895335608646 0.8614334470989761
+average 0.6250065221231116 0.8529520182308594
+
+malaymmlu-malaysian-reasoning-20b-lora-r128-selected-experts-merged
+STEM 0.6958657388456816 0.8780188293082276
+Language 0.6456743002544529 0.8581424936386769
+Social science 0.5881757733448973 0.8243712055507372
+Others 0.6315663228591989 0.8560805948668746
+Humanities 0.6400455062571103 0.8689419795221843
+average 0.6402655283122682 0.8571110205773401
+
+malaymmlu-malaysian-reasoning-20b-lora-r64-selected-experts-merged
+STEM 0.697912402783463 0.8923454768726975
+Language 0.6434478371501272 0.8575063613231552
+Social science 0.5883203237930038 0.825383058687482
+Others 0.623650755576877 0.8522427440633246
+Humanities 0.6291240045506257 0.8671217292377702
+average 0.6364910647708194 0.858919874036886
+
+malaymmlu-malaysian-reasoning-20b-lora-r256-selected-experts-merged
+STEM 0.6913630781825624 0.8759721653704462
+Language 0.6463104325699746 0.8619592875318066
+Social science 0.5806591500433651 0.8216247470367158
+Others 0.6253298153034301 0.8462461021827776
+Humanities 0.6329920364050057 0.8559726962457338
+average 0.6353309025008675 0.852354999673496
+
+malaymmlu-malaysian-reasoning-20b-lora-r256-experts-merged
+STEM 0.7114203847728203 0.8878428162095784
+Language 0.6563295165394402 0.863708651399491
+Social science 0.6046545244290257 0.8292859207863544
+Others 0.6560326217318302 0.8663948189014152
+Humanities 0.6555176336746302 0.8662116040955632
+average 0.6567909362295493 0.8626887622784803
+
+malaymmlu-malaysian-reasoning-20b-lora-r512-selected-experts-merged
+STEM 0.6901350798198935 0.8845681539091281
+Language 0.6493320610687023 0.8697519083969466
+Social science 0.5959814975426424 0.8291413703382481
+Others 0.6373230990645239 0.8601583113456465
+Humanities 0.6341296928327645 0.872127417519909
+average 0.6413802860657054 0.8631494323019757
+
+malaymmlu-malaysian-reasoning-20b-lora-r16-selected-experts-merged
+STEM 0.7015963978714695 0.8935734752353663
+Language 0.6240458015267175 0.8532124681933843
+Social science 0.5793581960104076 0.8281295172015033
+Others 0.6214919644998801 0.857040057567762
+Humanities 0.6200227531285551 0.8625711035267349
+average 0.629303022607406 0.8589053243449503
+
+malaymmlu-malaysian-reasoning-20b-lora-r32-experts-merged
+STEM 0.6946377404830127 0.8902988129349161
+Language 0.6445610687022901 0.8557569974554707
+Social science 0.6045099739809193 0.8355015900549292
+Others 0.6286879347565364 0.8515231470376589
+Humanities 0.6359499431171786 0.8577929465301479
+average 0.6416693322079874 0.8581746988026246
+
+malaymmlu-malaysian-reasoning-20b-lora-r64-experts-merged
+STEM 0.703643061809251 0.8927548096602538
+Language 0.6556933842239185 0.8624363867684478
+Social science 0.603642671292281 0.834345186470078
+Others 0.6368433677140801 0.8541616694650995
+Humanities 0.6357224118316268 0.863481228668942
+average 0.6471089793742315 0.8614358562065642
 ```
 
 Where non-experts,
@@ -83,7 +171,7 @@ We use 256 rank parameter for linear layers including experts, model pushed at h
 1. Run vLLM,
 
 ```bash
-vllm serve malaysian-reasoning-120b-lora-r256-experts --max-model-len 10000 --tensor-parallel-size 8 --enable-expert-parallel
+vllm serve nfs/malaysian-reasoning-120b-lora-r256-experts --max-model-len 10000 --tensor-parallel-size 8 --enable-expert-parallel
 ```
 
 Achieved,

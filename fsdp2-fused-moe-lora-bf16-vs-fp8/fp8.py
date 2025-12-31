@@ -41,7 +41,11 @@ from streaming.base.format.mds.encodings import Encoding, _encodings
 from tqdm import tqdm
 import numpy as np
 import wandb
-from torchao.float8 import convert_to_float8_training, Float8LinearConfig
+from torchao.float8 import (
+    convert_to_float8_training, 
+    Float8LinearConfig, 
+    precompute_float8_dynamic_scale_for_fsdp,
+)
 from torchao.prototype.moe_training.scaled_grouped_mm import _to_fp8_rowwise_then_scaled_grouped_mm
 
 class UInt32(Encoding):
@@ -383,7 +387,6 @@ def main():
     model_name = "GLM-4.5-Air-non-transpose"
     warmup_steps = 50
     learning_rate = 1e-4
-    total_steps = 200
     dataset = 'multipacking-glm'
     batch_size = 1
     grad_accumulation = 2
@@ -436,16 +439,15 @@ def main():
                 return False
         return True
 
-    config = Float8LinearConfig.from_recipe_name("rowwise")
+    config = Float8LinearConfig.from_recipe_name(
+        "rowwise",
+        enable_fsdp_float8_all_gather=True,
+    )
     # https://github.com/pytorch/torchtitan/pull/1108/files
     torch._inductor.config.emulate_precision_casts = True
     convert_to_float8_training(model, config=config, module_filter_fn=module_filter_fn)
 
     fsdp_kwargs = {}
-    fsdp_kwargs["mp_policy"] = MixedPrecisionPolicy(
-        param_dtype=torch.bfloat16,
-        reduce_dtype=torch.float32,
-    )
     fsdp_kwargs["mesh"] = dp_mesh
 
     for module in tqdm(model.modules()):
@@ -477,6 +479,8 @@ def main():
         collate_fn=collator,
     )
     optim = torch.optim.AdamW(model.parameters(), lr=1e-4, fused=True, weight_decay=0.01)
+    steps_per_epoch = len(train_loader) // grad_accumulation
+    total_steps = steps_per_epoch * 1
 
     scheduler = get_linear_schedule_with_warmup(
         optim, 
@@ -528,6 +532,7 @@ def main():
 
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optim.step()
+            precompute_float8_dynamic_scale_for_fsdp(model)
             scheduler.step()
             optim.zero_grad()
 
