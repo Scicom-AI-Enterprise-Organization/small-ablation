@@ -35,6 +35,7 @@ def main(pattern):
     folders = [f for f in folders if '.zip' not in f and 'baseline' not in f and '.ipynb' not in f]
     for f in folders:
         print(f, len(glob(os.path.join(f, '*.json'))))
+    print()
 
     for f in folders:
         total_k1 = defaultdict(int)
