@@ -5,7 +5,7 @@ LoRA SFT on https://huggingface.co/datasets/Scicom-intl/Malaysian-Instructions
 ## Ablation on multiple models
 
 1. Ablation on Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, openai/gpt-oss-120b, zai-org/GLM-4.5-Air and Qwen/Qwen3-235B-A22B
-2. Dense LoRA SFT done using DeepSpeed Zero3 HF Trainer while MoE LoRA SFT done using FSDP2 + EP except for GPT OSS.
+2. Dense LoRA SFT done using DeepSpeed Zero3 HF Trainer while MoE LoRA SFT done using FSDP2 + Fused MoE except for GPT OSS.
 3. Multipacking variable length 16384 context length, with global batch size of 32, so global total tokens is 524288.
 4. All self attention linear layers with rank 256 with alpha multiply by 2.0 <sup> + </sup>
 5. Liger fused cross entropy.

@@ -1,4 +1,3 @@
-
 import torch
 
 torch._dynamo.config.capture_scalar_outputs = True
@@ -42,6 +41,8 @@ from streaming.base.format.mds.encodings import Encoding, _encodings
 from tqdm import tqdm
 import numpy as np
 import wandb
+from torchao.float8 import convert_to_float8_training, Float8LinearConfig
+from torchao.prototype.moe_training.scaled_grouped_mm import _to_fp8_rowwise_then_scaled_grouped_mm
 
 class UInt32(Encoding):
     def encode(self, obj) -> bytes:
@@ -154,6 +155,48 @@ class ExpertLoRAWeights(nn.Module):
         with torch.no_grad():
             init.kaiming_uniform_(self.A, a=math.sqrt(5))
             
+def _to_column_major(x: torch.Tensor) -> torch.Tensor:
+    return x.transpose(-1, -2).contiguous()
+
+def pad_for_alignment(grouped_inputs, experts_count, alignment=16):
+    """Pad inputs so each expert group is aligned. Returns padding context for reuse."""
+    experts_count_padded = ((experts_count + alignment - 1) // alignment) * alignment
+    
+    # cu_experts_count = experts_count.cumsum(dim=0).to(torch.int32)
+    cu_original = torch.cat([torch.zeros(1, dtype=torch.int32, device=experts_count.device), 
+                             experts_count.cumsum(0).to(torch.int32)])
+    cu_padded = torch.cat([torch.zeros(1, dtype=torch.int32, device=experts_count.device), 
+                           experts_count_padded.cumsum(0).to(torch.int32)])
+    
+    total_tokens = grouped_inputs.shape[0]
+    token_indices = torch.arange(total_tokens, device=grouped_inputs.device)
+    expert_ids = torch.searchsorted(cu_original[1:], token_indices, right=True)
+    position_in_group = token_indices - cu_original[expert_ids]
+    dest_indices = cu_padded[expert_ids] + position_in_group
+    
+    total_padded = cu_padded[-1]
+    padded_inputs = torch.zeros(total_padded, grouped_inputs.shape[1], 
+                                dtype=grouped_inputs.dtype, device=grouped_inputs.device)
+    padded_inputs[dest_indices] = grouped_inputs
+    
+    ctx = {
+        'cu_original': cu_original[1:],
+        'cu_padded': cu_padded[1:],
+        'dest_indices': dest_indices,
+        'total_padded': total_padded,
+        'total_tokens': total_tokens,
+    }
+    return padded_inputs, ctx
+
+def pad_tensor(tensor, ctx):
+    padded = torch.zeros(ctx['total_padded'], tensor.shape[1], 
+                         dtype=tensor.dtype, device=tensor.device)
+    padded[ctx['dest_indices']] = tensor
+    return padded
+
+def unpad_tensor(padded_tensor, ctx):
+    return padded_tensor[ctx['dest_indices']]
+
 class Glm4MoeMoEExpertParallel(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -161,9 +204,9 @@ class Glm4MoeMoEExpertParallel(nn.Module):
         self.top_k = config.num_experts_per_tok
         self.norm_topk_prob = config.norm_topk_prob
 
-        self.gate_proj = nn.Parameter(torch.zeros(self.num_experts, config.hidden_size, config.moe_intermediate_size))
-        self.up_proj = nn.Parameter(torch.zeros(self.num_experts, config.hidden_size, config.moe_intermediate_size))
-        self.down_proj = nn.Parameter(torch.zeros(self.num_experts, config.moe_intermediate_size, config.hidden_size))
+        self.gate_proj = nn.Parameter(torch.zeros(self.num_experts, config.moe_intermediate_size, config.hidden_size))
+        self.up_proj = nn.Parameter(torch.zeros(self.num_experts, config.moe_intermediate_size, config.hidden_size))
+        self.down_proj = nn.Parameter(torch.zeros(self.num_experts, config.hidden_size, config.moe_intermediate_size))
         self._is_stacked = False
         self.act_fn = ACT2FN[config.hidden_act]
 
@@ -186,15 +229,15 @@ class Glm4MoeMoEExpertParallel(nn.Module):
         self._is_stacked = True
 
         self.gate_lora = ExpertLoRAWeights(
-            self.num_experts, self.gate_proj.shape[1], self.gate_proj.shape[2], r
+            self.num_experts, self.gate_proj.shape[2], self.gate_proj.shape[1], r
         )
         self.up_lora = ExpertLoRAWeights(
-            self.num_experts, self.up_proj.shape[1], self.up_proj.shape[2], r
+            self.num_experts, self.up_proj.shape[2], self.up_proj.shape[1], r
         )
         self.down_lora = ExpertLoRAWeights(
-            self.num_experts, self.down_proj.shape[1], self.down_proj.shape[2], r
+            self.num_experts, self.down_proj.shape[2], self.down_proj.shape[1], r
         )
-
+        
     def moe(self, hidden_states: torch.Tensor, topk_indices: torch.Tensor, topk_weights: torch.Tensor):
         inputs = hidden_states
         M = hidden_states.shape[0]
@@ -207,10 +250,13 @@ class Glm4MoeMoEExpertParallel(nn.Module):
         experts_count = topk_indices.view(-1).bincount(minlength=self.num_experts)
         cu_experts_count = experts_count.cumsum(dim=0).to(torch.int32)
 
-        gate_out = torch._grouped_mm(
-            grouped_inputs,
-            self.gate_proj,
-            cu_experts_count,
+        padded_inputs, pad_ctx = pad_for_alignment(grouped_inputs, experts_count, alignment=16)
+        cu_experts_padded = pad_ctx['cu_padded']
+
+        gate_out = _to_fp8_rowwise_then_scaled_grouped_mm(
+            padded_inputs,
+            self.gate_proj.transpose(-1, -2),
+            cu_experts_padded,
         )
         if self.gate_lora is not None:
             gate_out_lora_A = torch._grouped_mm(
@@ -223,12 +269,12 @@ class Glm4MoeMoEExpertParallel(nn.Module):
                 self.gate_lora.B,
                 cu_experts_count,
             )
-            gate_out = gate_out + gate_out_lora_B * self.alpha
+            gate_out = gate_out + pad_tensor(gate_out_lora_B, pad_ctx) * self.alpha
         
-        up_out = torch._grouped_mm(
-            grouped_inputs,
-            self.up_proj,
-            cu_experts_count,
+        up_out = _to_fp8_rowwise_then_scaled_grouped_mm(
+            padded_inputs,
+            self.up_proj.transpose(-1, -2),
+            cu_experts_padded,
         )
         if self.up_lora is not None:
             up_out_lora_A = torch._grouped_mm(
@@ -241,19 +287,20 @@ class Glm4MoeMoEExpertParallel(nn.Module):
                 self.up_lora.B,
                 cu_experts_count,
             )
-            up_out = up_out + up_out_lora_B * self.alpha
-
-        intermediate = self.act_fn(gate_out) * up_out
+            up_out = up_out + pad_tensor(up_out_lora_B, pad_ctx) * self.alpha
         
-        down_out = torch._grouped_mm(
-            intermediate,
-            self.down_proj,
-            cu_experts_count,
+        intermediate_padded = self.act_fn(gate_out) * up_out
+        
+        down_out_padded = _to_fp8_rowwise_then_scaled_grouped_mm(
+            intermediate_padded,
+            self.down_proj.transpose(-1, -2),
+            cu_experts_padded,
         )
 
         if self.down_lora is not None:
+            intermediate_unpadded = unpad_tensor(intermediate_padded, pad_ctx)
             down_out_lora_A = torch._grouped_mm(
-                intermediate,
+                intermediate_unpadded,
                 self.down_lora.A,
                 cu_experts_count,
             )
@@ -262,14 +309,14 @@ class Glm4MoeMoEExpertParallel(nn.Module):
                 self.down_lora.B,
                 cu_experts_count,
             )
-            down_out = down_out + down_out_lora_B * self.alpha
+            down_out_padded = down_out_padded + pad_tensor(down_out_lora_B, pad_ctx) * self.alpha
 
+        down_out = unpad_tensor(down_out_padded, pad_ctx)
         down_out = down_out * topk_weights.view(-1)[sort_indices].unsqueeze(-1)
 
         outputs = inputs.new_zeros(M, hidden_dim)
         sorted_pos_expanded = sorted_pos.unsqueeze(-1).expand(-1, hidden_dim)
         outputs.scatter_add_(0, sorted_pos_expanded, down_out.to(outputs.dtype))
-
         return outputs
     
     def forward(self, hidden_states):
@@ -333,15 +380,13 @@ def main():
     dp_world_size = dp_mesh.size()
 
     set_seed(42)
-    model_name = "nfs/nfs/GLM-4.5-Air"
+    model_name = "GLM-4.5-Air-non-transpose"
     warmup_steps = 50
     learning_rate = 1e-4
+    total_steps = 200
     dataset = 'multipacking-glm'
     batch_size = 1
-    grad_accumulation = 4
-    epoch = 3
-    checkpoint_dir = f'{model_name}_checkpoint'
-    os.makedirs(checkpoint_dir, exist_ok=True)
+    grad_accumulation = 2
     
     model = Model.from_pretrained(
         model_name, 
@@ -383,6 +428,19 @@ def main():
         if isinstance(module, Glm4MoeMoEExpertParallel):
             module.apply_lora_stack(r=r, alpha=alpha)
 
+    def module_filter_fn(mod: torch.nn.Module, fqn: str):
+        if fqn == "1":
+            return False
+        if isinstance(mod, torch.nn.Linear):
+            if mod.in_features % 16 != 0 or mod.out_features % 16 != 0:
+                return False
+        return True
+
+    config = Float8LinearConfig.from_recipe_name("rowwise")
+    # https://github.com/pytorch/torchtitan/pull/1108/files
+    torch._inductor.config.emulate_precision_casts = True
+    convert_to_float8_training(model, config=config, module_filter_fn=module_filter_fn)
+
     fsdp_kwargs = {}
     fsdp_kwargs["mp_policy"] = MixedPrecisionPolicy(
         param_dtype=torch.bfloat16,
@@ -400,7 +458,7 @@ def main():
         checkpoint_wrapper_fn=non_reentrant_wrapper,
         check_fn=check_fn,
     )
-    # model = torch.compile(model)
+    model = torch.compile(model)
 
     dataset = Dataset(dataset)
     sampler = DistributedSampler(
@@ -419,8 +477,6 @@ def main():
         collate_fn=collator,
     )
     optim = torch.optim.AdamW(model.parameters(), lr=1e-4, fused=True, weight_decay=0.01)
-    steps_per_epoch = len(train_loader) // grad_accumulation
-    total_steps = steps_per_epoch * epoch
 
     scheduler = get_linear_schedule_with_warmup(
         optim, 
@@ -435,89 +491,93 @@ def main():
         wandb.init()
     
     total_global_total_tokens = 0
-    while step < total_steps:
-        batches = []
-        total_tokens = 0
-        for _ in range(grad_accumulation):
-            try:
-                batch = next(iter_train_loader)
-            except StopIteration:
-                iter_train_loader = iter(train_loader)
-                batch = next(iter_train_loader)
-            valid_tokens = (batch['labels'] != -100).sum().item()
-            total_tokens += valid_tokens
-            batches.append(batch)
-
-        token_tensor = torch.tensor([total_tokens], dtype=torch.long, device=device)
-        dp_group = dp_mesh.get_group()
-        dist.all_reduce(token_tensor, op=dist.ReduceOp.SUM, group=dp_group)
-        global_total_tokens = token_tensor.item()
-        total_global_total_tokens += global_total_tokens
-        
-        torch.cuda.synchronize()
-        t0 = time.time()
-
-        loss_sum = 0.0
-        for b in batches:
-            for k in b.keys():
-                if isinstance(b[k], torch.Tensor):
-                    b[k] = b[k].to(device, non_blocking=True)
-            
-            b['num_items_in_batch'] = torch.tensor(global_total_tokens)
-            out = model(**b, use_cache=False)
-            loss = out["loss"] * dp_world_size
-            loss.backward()
-            loss_sum += loss
-
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optim.step()
-        scheduler.step()
-        optim.zero_grad()
-
-        torch.cuda.synchronize()
-        t1 = time.time()
-        dt = t1 - t0
-
-        throughput_per_sec = global_total_tokens / dt
-
-        if rank == 0:
-            scalar_dict = {
-                "train/grad_norm": grad_norm,
-                "train/learning_rate": scheduler.get_last_lr()[0],
-                "train/loss": loss_sum,
-                "train/global_step": step,
-                "train/train_tokens_per_second": throughput_per_sec,
-                "train/num_input_tokens_seen": total_global_total_tokens,
-            }
-            print(scalar_dict)
-            try:
-                wandb.log(scalar_dict)
-            except Exception as e:
-                print('failed pushed to wandb', e)
-
-        if (step + 1) % steps_per_epoch == 0:
-            print(f'saving checkpoint at {step}')
-            sharded_sd = model.state_dict()
-            cpu_state_dict = {}
-            
-            for param_name, sharded_param in sharded_sd.items():
+    try:
+        while step < total_steps:
+            batches = []
+            total_tokens = 0
+            for _ in range(grad_accumulation):
                 try:
-                    full_param = sharded_param.full_tensor()
-                except:
-                    if rank == 0:
-                        print(f'{param_name} is not sharded')
-                    full_param = sharded_param
+                    batch = next(iter_train_loader)
+                except StopIteration:
+                    iter_train_loader = iter(train_loader)
+                    batch = next(iter_train_loader)
+                valid_tokens = (batch['labels'] != -100).sum().item()
+                total_tokens += valid_tokens
+                batches.append(batch)
 
-                if rank == 0 and 'lora' in param_name:
-                    cpu_state_dict[param_name] = full_param.cpu()
-                else:
-                    del full_param
+            token_tensor = torch.tensor([total_tokens], dtype=torch.long, device=device)
+            dp_group = dp_mesh.get_group()
+            dist.all_reduce(token_tensor, op=dist.ReduceOp.SUM, group=dp_group)
+            global_total_tokens = token_tensor.item()
+            total_global_total_tokens += global_total_tokens
             
-            if rank == 0:
-                torch.save(cpu_state_dict, os.path.join(checkpoint_dir, f'{step}-model_state_dict.pt'))
+            torch.cuda.synchronize()
+            t0 = time.time()
 
-        step += 1
-        pbar.update(1)
+            loss_sum = 0.0
+            for b in batches:
+                for k in b.keys():
+                    if isinstance(b[k], torch.Tensor):
+                        b[k] = b[k].to(device, non_blocking=True)
+                
+                b['num_items_in_batch'] = torch.tensor(global_total_tokens)
+                out = model(**b, use_cache=False)
+                loss = out["loss"] * dp_world_size
+                loss.backward()
+                loss_sum += loss
+
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optim.step()
+            scheduler.step()
+            optim.zero_grad()
+
+            torch.cuda.synchronize()
+            t1 = time.time()
+            dt = t1 - t0
+
+            throughput_per_sec = global_total_tokens / dt
+
+            if rank == 0:
+                scalar_dict = {
+                    "train/grad_norm": grad_norm,
+                    "train/learning_rate": scheduler.get_last_lr()[0],
+                    "train/loss": loss_sum,
+                    "train/global_step": step,
+                    "train/train_tokens_per_second": throughput_per_sec,
+                    "train/num_input_tokens_seen": total_global_total_tokens,
+                }
+                print(scalar_dict)
+                try:
+                    wandb.log(scalar_dict)
+                except Exception as e:
+                    print('failed pushed to wandb', e)
+
+            step += 1
+            pbar.update(1)
+        
+    except Exception as e:
+        print('major break', e)
+
+    sharded_sd = model.state_dict()
+    cpu_state_dict = {}
+        
+    for param_name, sharded_param in sharded_sd.items():
+        try:
+            full_param = sharded_param.full_tensor()
+        except:
+            if rank == 0:
+                print(f'{param_name} is not sharded')
+            full_param = sharded_param
+
+        if rank == 0 and 'lora' in param_name:
+            cpu_state_dict[param_name] = full_param.cpu()
+        else:
+            del full_param
+    
+    if rank == 0:
+        checkpoint_dir = 'nfs/nfs/GLM-4.5-Air-fp8'
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        torch.save(cpu_state_dict, os.path.join(checkpoint_dir, f'model_state_dict.pt'))
 
 if __name__ == "__main__":
     main()

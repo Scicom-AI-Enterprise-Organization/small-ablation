@@ -10,6 +10,8 @@ Because we build a lot our own FSDP2 EP MoE LORA script, I think we should compa
 HF_HUB_ENABLE_HF_TRANSFER=0 hf download Scicom-intl/Malaysian-Instructions-multipacking-glm --repo-type=dataset --local-dir=./multipacking-glm
 ```
 
+Script to prepare the dataset at [../malaysian-sft/notebook/multipack-malaysian-instructions-glm.ipynb](../malaysian-sft/notebook/multipack-malaysian-instructions-glm.ipynb)
+
 2. Stack the experts,
 
 ```bash

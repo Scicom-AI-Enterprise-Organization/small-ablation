@@ -1,14 +1,14 @@
-CUDA_VISIBLE_DEVICES="0,1" \
+CUDA_VISIBLE_DEVICES="4,5,6,7" \
 WANDB_PROJECT="malaysian-reasoning-20b" \
 WANDB_NAME="lora-r512-selected-experts" \
 TORCH_DISTRIBUTED_DEBUG="info" \
-torchrun --nproc_per_node 2 --master_port=29506 \
+torchrun --nproc_per_node 4 --master_port=29506 \
 -m openai-oss-sft-lora \
 --fsdp "full_shard auto_wrap" \
 --fsdp_config fsdp.json \
 --model_name_or_path openai/gpt-oss-20b \
 --per_device_train_batch_size 2 \
---gradient_accumulation_steps 2 \
+--gradient_accumulation_steps 1 \
 --output_dir malaysian-reasoning-20b-lora-r512-selected-experts \
 --bf16 --do_train --do_eval false --num_train_epochs 2 \
 --train_file "malaysian-reasoning-16k-mosaic" \

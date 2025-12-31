@@ -411,9 +411,10 @@ def main():
                     setattr(module, child_name, lora)
 
                 if child_name == 'experts' and isinstance(child, GptOssExperts):
-                    num = re.search(r"\.layers\.(\d+)\.", name).group(1)
+                    num = int(re.search(r"\.layers\.(\d+)\.", name).group(1))
                     if len(specific_layers) and num not in specific_layers:
                         continue
+                    print(child_name)
                     lora = ExpertLoRA(child, r=r, alpha=alpha)
                     setattr(module, child_name, lora)
 

@@ -68,7 +68,7 @@ class VLLMServer:
             "/root/.venv/bin/vllm", "serve", self.model,
             "--gpu-memory-utilization", str(self.config.gpu_memory_utilization),
             "--port", str(self.port),
-            "--max-model-len", "12000"
+            "--max-model-len", "10000"
         ]
 
         print(f"Starting vLLM: {' '.join(cmd)}")
@@ -182,7 +182,7 @@ class VLLMServer:
 
 class MalayMMLUEvaluator:
 
-    ANSWER_PATTERN = re.compile(r"\\boxed\{([^}]*)\}")
+    ANSWER_PATTERN = re.compile(r"boxed\{([^}]*)\}")
 
     def __init__(self, server: VLLMServer, output_dir: Path, config: Config):
         self.server = server
@@ -334,7 +334,7 @@ def evaluate_model(model: str, port: int, output_dir: str, gpu_id: int, config: 
         evaluator = MalayMMLUEvaluator(server, output_path, config)
         questions = evaluator.load_questions()
         evaluator.run_parallel(questions)
-        evaluator.run_sequential_cleanup(questions)
+        evaluator.run_parallel(questions)
 
     time.sleep(config.inter_model_delay)
 

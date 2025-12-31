@@ -2,6 +2,7 @@ from glob import glob
 import json
 import re
 import os
+import click
 from tqdm import tqdm
 from collections import Counter
 
@@ -26,40 +27,45 @@ def parse(text):
 with open('MalayMMLU_0shot.json') as fopen:
     malaymmlu = json.load(fopen)
 
-folders = glob('malaymmlu-malaysian-reasoning-20b*')
-folders = [f for f in folders if '.zip' not in f and 'baseline' not in f and '.ipynb' not in f]
-for f in folders:
-    print(f, len(glob(os.path.join(f, '*.json'))))
+@click.command()
+@click.option("--pattern", default='malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-*', help="malaymmlu glob pattern")
+def main(pattern):
+    folders = glob(pattern)
+    folders = [f for f in folders if '.zip' not in f and 'baseline' not in f and '.ipynb' not in f]
+    for f in folders:
+        print(f, len(glob(os.path.join(f, '*.json'))))
 
-for f in folders:
-    total_k1 = 0
-    total_k5 = 0
-    total = 0
-    wrong = []
-    l = len(malaymmlu)
-    for i in range(len(malaymmlu)):
-        try:
-            results = []
-            for k in range(5):
-                try:
-                    filename = os.path.join(f, f'{i}-{k}.json')
-                    with open(filename) as fopen:
-                        d = json.load(fopen)
-                    p = parse(d)
-                    if p:
-                        results.append(p)
-                except:
-                    pass
-            if len(results):
-                s = aggregate_mcq_predictions(results[:3], malaymmlu[i]['key'])
-                total_k1 += aggregate_mcq_predictions(results[:1], malaymmlu[i]['key'])
-                total_k5 += s
-                total += 1
-    
-                if s == 0:
-                    wrong.append((results, malaymmlu[i]))
-        except Exception as e:
-            pass
+    for f in folders:
+        total_k1 = 0
+        total_k5 = 0
+        total = 0
+        wrong = []
+        for i in range(len(malaymmlu)):
+            try:
+                results = []
+                for k in range(3):
+                    try:
+                        filename = os.path.join(f, f'{i}-{k}.json')
+                        with open(filename) as fopen:
+                            d = json.load(fopen)
+                        p = parse(d)
+                        if p:
+                            results.append(p)
+                    except:
+                        pass
+                if len(results):
+                    s = aggregate_mcq_predictions(results[:3], malaymmlu[i]['key'])
+                    total_k1 += aggregate_mcq_predictions(results[:1], malaymmlu[i]['key'])
+                    total_k5 += s
+                    total += 1
+        
+                    if s == 0:
+                        wrong.append((results, malaymmlu[i]))
+            except Exception as e:
+                pass
 
-    if total > 0:
-        print(f, total_k1 / l, total_k5 / l)
+        if total > 0:
+            print(f, total_k1 / total, total_k5 / total)
+
+if __name__ == "__main__":
+    main()
