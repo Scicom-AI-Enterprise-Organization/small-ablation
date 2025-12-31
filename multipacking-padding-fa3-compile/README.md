@@ -24,6 +24,12 @@ Optimized,
 HF_HUB_ENABLE_HF_TRANSFER=0 hf download Scicom-intl/multipacking-multilingual-tts-10k-qwen3-optimized --repo-type=dataset --local-dir=./multipacking-optimized
 ```
 
+3. Run any script,
+
+```bash
+bash non-optimized-padding.sh
+```
+
 ## WanDB
 
 We also recorded MFU and Throughput per second, WanDB project at https://wandb.ai/aies-scicom-scicom-ai/multipacking-padding-fa3-compile
