@@ -1,6 +1,6 @@
 # FSDP2 Fused MoE LoRA BF16 vs FP8
 
-Because we build a lot our own FSDP2 EP MoE LORA script, I think we should compare the loss using the FSDP2 Fused MoE with zai-org/GLM-4.5-Air, applying LoRA to all linear layers including the experts where the base layers in lower precision such as FP8, while keeping the global batch size the same.
+We should compare the loss using the FSDP2 Fused MoE with zai-org/GLM-4.5-Air, applying LoRA to all linear layers including the experts where the base layers in lower precision such as FP8, while keeping the global batch size the same.
 
 ## How to
 

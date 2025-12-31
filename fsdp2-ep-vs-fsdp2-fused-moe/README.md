@@ -1,6 +1,6 @@
 # FSDP2-EP vs FSDP2 Fused MoE
 
-Because we build a lot our own FSDP2 EP MoE LORA script, I think we should compare the loss using the FSDP2 Fused MoE with zai-org/GLM-4.5-Air, applying LoRA to all linear layers including the experts, while keeping the global batch size the same.
+We should compare the loss using the FSDP2 Fused MoE with zai-org/GLM-4.5-Air, applying LoRA to all linear layers including the experts, while keeping the global batch size the same.
 
 ## How to
 

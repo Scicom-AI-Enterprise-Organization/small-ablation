@@ -56,6 +56,11 @@ malaymmlu-malaysian-reasoning-20b-lora-r512-selected-experts-merged 0.6081075386
 malaymmlu-malaysian-reasoning-20b-lora-r16-experts-merged 0.43287707291392474 0.6925068000350969
 malaymmlu-malaysian-reasoning-20b-lora-r16-selected-experts-merged 0.6015023818248443 0.8407230975937462
 malaymmlu-malaysian-reasoning-20b-lora-r32-experts-merged 0.4361610599673062 0.6942269637787146
+```
+
+Where non-experts,
+
+```
 malaymmlu-malaysian-reasoning-20b-lora-r16-merged 0.6103171980835949 0.8461093672559061
 malaymmlu-malaysian-reasoning-20b-lora-r32-merged 0.6082934082273252 0.8466049892615232
 malaymmlu-malaysian-reasoning-20b-lora-r64-merged 0.6182629166150415 0.850989138066328
@@ -67,6 +72,7 @@ malaymmlu-malaysian-reasoning-20b-lora-r256-merged 0.6211126254491389 0.85354974
 
 1. LoRA weight always in FP32, during merging, merge in FP32, only downcast to base layer precision during add, our custom Linear LoRA module achieved the same loss as PEFT LoRA, https://wandb.ai/aies-scicom-scicom-ai/malaysian-reasoning-20b/runs/bdgdqjhw
 2. FSDP 1 is pain, I think everyone should move on from FSDP 1, for `use_orig_params=False` you cannot put trainable and non-trainable weights in the same module, so you have to wrap the trainable weights in separate module such as `nn.ModuleDict`, and if you use `huggingface.Trainer`, make sure you patch `self.accelerator.state.fsdp_plugin.auto_wrap_policy = fsdp_auto_wrap_policy(self.model)`.
+3. expert bias just makes thing harder.
 
 ## Scale up to GPT OSS 120B
 
@@ -77,7 +83,7 @@ We use 256 rank parameter for linear layers including experts, model pushed at h
 1. Run vLLM,
 
 ```bash
-vllm serve malaysian-reasoning-120b-lora-r256-experts --max-model-len 10000 --tensor-parallel-size 4 --enable-expert-parallel
+vllm serve malaysian-reasoning-120b-lora-r256-experts --max-model-len 10000 --tensor-parallel-size 8 --enable-expert-parallel
 ```
 
 Achieved,

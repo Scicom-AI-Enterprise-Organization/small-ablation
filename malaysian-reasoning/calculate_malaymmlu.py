@@ -3,8 +3,9 @@ import json
 import re
 import os
 import click
+import numpy as np
 from tqdm import tqdm
-from collections import Counter
+from collections import Counter, defaultdict
 
 def aggregate_mcq_predictions(preds, gold, method="any"):
     if method == "majority":
@@ -36,9 +37,9 @@ def main(pattern):
         print(f, len(glob(os.path.join(f, '*.json'))))
 
     for f in folders:
-        total_k1 = 0
-        total_k5 = 0
-        total = 0
+        total_k1 = defaultdict(int)
+        total_k5 = defaultdict(int)
+        total = defaultdict(int)
         wrong = []
         for i in range(len(malaymmlu)):
             try:
@@ -55,17 +56,26 @@ def main(pattern):
                         pass
                 if len(results):
                     s = aggregate_mcq_predictions(results[:3], malaymmlu[i]['key'])
-                    total_k1 += aggregate_mcq_predictions(results[:1], malaymmlu[i]['key'])
-                    total_k5 += s
-                    total += 1
+                    total_k1[malaymmlu[i]['category']] += aggregate_mcq_predictions(results[:1], malaymmlu[i]['key'])
+                    total_k5[malaymmlu[i]['category']] += s
         
                     if s == 0:
                         wrong.append((results, malaymmlu[i]))
             except Exception as e:
                 pass
+            
+            total[malaymmlu[i]['category']] += 1
+        
+        print(f)
+        avg_k1 = []
+        avg_k5 = []
+        for k, v in total.items():
+            print(k, total_k1[k] / v, total_k5[k] / v)
+            avg_k1.append(total_k1[k] / v)
+            avg_k5.append(total_k5[k] / v)
+        print('average', np.mean(avg_k1), np.mean(avg_k5))
 
-        if total > 0:
-            print(f, total_k1 / total, total_k5 / total)
+        print()
 
 if __name__ == "__main__":
     main()
