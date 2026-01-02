@@ -1,16 +1,17 @@
-# Malaysian SFT
+# Malaysian Low Rank SFT
 
-LoRA SFT on https://huggingface.co/datasets/Scicom-intl/Malaysian-Instructions
+Low Rank SFT on https://huggingface.co/datasets/Scicom-intl/Malaysian-Instructions
 
 ## Ablation on multiple models
 
-1. Ablation on Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, openai/gpt-oss-120b, zai-org/GLM-4.5-Air and Qwen/Qwen3-235B-A22B
+1. Ablation on Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, openai/gpt-oss-120b, zai-org/GLM-4.5-Air and Qwen/Qwen3-30B-A3B-Instruct-2507
 2. Dense LoRA SFT done using DeepSpeed Zero3 HF Trainer while MoE LoRA SFT done using FSDP2 + Fused MoE except for GPT OSS.
-3. Multipacking variable length 16384 context length, with global batch size of 32, so global total tokens is 524288.
-4. All self attention linear layers with rank 256 with alpha multiply by 2.0 <sup> + </sup>
-5. Liger fused cross entropy.
-6. 1e-4 learning rate, 50 warmup, 3 epoch only.
-7. Calculate accuracy for each epoch using reasoning system prompt.
+3. Also tried DoRA for Qwen3 MoE and GLM 4.5 Air.
+4. Multipacking variable length 16384 context length, with global batch size of 32, so global total tokens is 524288.
+5. All linear layers with rank 256 with alpha multiply by 2.0, for MoE including experts <sup> + </sup>.
+6. Liger fused cross entropy.
+7. 1e-4 learning rate, 50 warmup, 3 epoch only.
+8. Calculate accuracy for each epoch using reasoning system prompt.
 
 <sup> + </sup> with the rank of each equal to the total rank divided by the number of active experts, https://thinkingmachines.ai/blog/lora/
 
@@ -18,19 +19,25 @@ LoRA SFT on https://huggingface.co/datasets/Scicom-intl/Malaysian-Instructions
 
 https://wandb.ai/aies-scicom-scicom-ai/malaysian-sft
 
-## Benchmark
+## Finetuning
 
 We benchmark using https://huggingface.co/datasets/UMxYTLAILabs/MalayMMLU
 
 ### Qwen/Qwen3-32B
 
-1. Run generation,
+1. Finetune,
+
+```bash
+bash ds3-qwen3-32b-lora-256.sh
+```
+
+2. Run generation,
 
 ```bash
 python3 malaymmlu.py --pattern "ds3-qwen3-32b-lora-256*" --num_gpus 8 --gpu_partition 2
 ```
 
-2. Calculate accuracy,
+3. Calculate accuracy,
 
 ```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-ds3-qwen3-32b-lora-256-checkpoint-*"
@@ -68,13 +75,19 @@ average 0.7507443895318702 0.87592688538857
 
 ### Qwen/Qwen2.5-72B-Instruct
 
-1. Run generation,
+1. Finetune,
+
+```bash
+bash ds3-qwen2.5-72b-lora-256.sh
+```
+
+2. Run generation,
 
 ```bash
 python3 malaymmlu.py --pattern "ds3-qwen2.5-72b-lora-256*" --num_gpus 8 --gpu_partition 4
 ```
 
-2. Calculate accuracy,
+3. Calculate accuracy,
 
 ```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-*"
@@ -112,13 +125,19 @@ average 0.7331386401040277 0.8708796783323344
 
 ### meta-llama/Llama-3.1-70B-Instruct
 
-1. Run generation,
+1. Finetune,
+
+```bash
+bash ds3-llama3.1-70b-lora-256.sh
+```
+
+2. Run generation,
 
 ```bash
 python3 malaymmlu.py --pattern "ds3-llama3.1-70b-lora-256*" --num_gpus 8 --gpu_partition 4
 ```
 
-2. Calculate accuracy,
+3. Calculate accuracy,
 
 ```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-ds3-llama3.1-70b-lora-256-checkpoint-*"
@@ -156,16 +175,40 @@ average 0.7640102106039417 0.8764299932932479
 
 ### zai-org/GLM-4.5-Air
 
-1. Run generation,
+1. Finetune,
 
 ```bash
-python3 malaymmlu.py --pattern "ramdisk/GLM-4.5-Air-lora-256-*" --num_gpus 8 --gpu_partition 4
+bash fsdp2-fused-moe-glm-4.5-air-lora-256.sh
 ```
 
-2. Calculate accuracy,
+2. Run generation,
+
+```bash
+python3 malaymmlu.py --pattern "GLM-4.5-Air-lora-256-*" --num_gpus 8 --gpu_partition 4
+```
+
+3. Calculate accuracy,
 
 ```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-GLM-4.5-Air-lora-256-*"
 ```
 
 ### Qwen/Qwen3-30B-A3B-Instruct-2507
+
+1. Finetune,
+
+```bash
+bash fsdp2-fused-moe-Qwen3-30B-A3B-lora-256.sh
+```
+
+2. Run generation,
+
+```bash
+python3 malaymmlu.py --pattern "Qwen3-30B-A3B-Instruct-2507-lora-256-*" --num_gpus 8 --gpu_partition 2
+```
+
+3. Calculate accuracy,
+
+```bash
+python3 calculate_malaymmlu.py --pattern "malaymmlu-Qwen3-30B-A3B-Instruct-2507-lora-256-*"
+```

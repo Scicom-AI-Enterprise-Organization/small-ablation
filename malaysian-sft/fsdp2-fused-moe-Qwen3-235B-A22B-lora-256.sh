@@ -6,5 +6,5 @@ torchrun --nproc_per_node 8 --master_port=29502 \
 --model_name "gfs/01be5b33/Qwen3-235B-A22B-Instruct-2507-stack" \
 --batch_size 1 \
 --grad_accumulation 4 \
---dataset "multipacking-qwen3" \
+--dataset "multipacking-qwen3-10k" \
 --deeper_fsdp
