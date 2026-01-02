@@ -136,16 +136,26 @@ class Model(Glm4MoeForCausalLM):
             return {'loss': loss}
         return super_out
 
-class ExpertLoRAWeights(nn.Module):
-    """Wrapper to make expert LoRA weights more FSDP-friendly"""
+class ExpertDoRAWeights(nn.Module):
+    """Wrapper to make expert DoRA weights more FSDP-friendly"""
     def __init__(self, num_experts, in_dim, out_dim, r, dtype=torch.bfloat16):
         super().__init__()
         self.A = nn.Parameter(torch.zeros(num_experts, in_dim, r, dtype=dtype))
         self.B = nn.Parameter(torch.zeros(num_experts, r, out_dim, dtype=dtype))
+        # magnitude per expert per output neuron: (num_experts, out_dim)
+        self.magnitude = nn.Parameter(torch.ones(num_experts, out_dim, dtype=dtype))
         
         with torch.no_grad():
             init.kaiming_uniform_(self.A, a=math.sqrt(5))
-            
+    
+    def init_magnitude_from_weight(self, weight: torch.Tensor):
+        """Initialize magnitude from pretrained weight norms. weight: (num_experts, in_dim, out_dim)"""
+        with torch.no_grad():
+            # norm over input dim for each expert's output neuron
+            norms = weight.norm(dim=1)  # (num_experts, out_dim)
+            self.magnitude.copy_(norms.to(self.magnitude.dtype))
+
+
 class Glm4MoeMoEExpertParallel(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -163,98 +173,95 @@ class Glm4MoeMoEExpertParallel(nn.Module):
         self.shared_experts = Glm4MoeMLP(
             config=config, intermediate_size=config.moe_intermediate_size * config.n_shared_experts
         )
-        self.gate_lora = None
-        self.up_lora = None
-        self.down_lora = None
+        self.gate_dora = None
+        self.up_dora = None
+        self.down_dora = None
     
-    def apply_lora_stack(self, r, alpha):
+    def apply_dora_stack(self, r, alpha):
         if self._is_stacked:
             return
 
         self.r = r
-        self.alpha = alpha
-        self.alpha = alpha / r
-        
+        self.scaling = alpha / r
         self._is_stacked = True
 
-        self.gate_lora = ExpertLoRAWeights(
+        self.gate_dora = ExpertDoRAWeights(
             self.num_experts, self.gate_proj.shape[1], self.gate_proj.shape[2], r
         )
-        self.up_lora = ExpertLoRAWeights(
+        self.up_dora = ExpertDoRAWeights(
             self.num_experts, self.up_proj.shape[1], self.up_proj.shape[2], r
         )
-        self.down_lora = ExpertLoRAWeights(
+        self.down_dora = ExpertDoRAWeights(
             self.num_experts, self.down_proj.shape[1], self.down_proj.shape[2], r
         )
+        
+        # initialize magnitudes from pretrained weights
+        self.gate_dora.init_magnitude_from_weight(self.gate_proj.data)
+        self.up_dora.init_magnitude_from_weight(self.up_proj.data)
+        self.down_dora.init_magnitude_from_weight(self.down_proj.data)
+
+    def _apply_dora_grouped(
+        self,
+        inputs: torch.Tensor,
+        base_weight: torch.Tensor,
+        dora: ExpertDoRAWeights,
+        cu_experts_count: torch.Tensor,
+        experts_count: torch.Tensor,
+    ):
+        """
+        Apply DoRA with grouped_mm.
+        inputs: (M * topk, in_dim)
+        base_weight: (num_experts, in_dim, out_dim)
+        """
+        # compute adapted weight = W + scaling * A @ B
+        lora_update = torch.bmm(dora.A, dora.B)  # (num_experts, in_dim, out_dim)
+        adapted_weight = base_weight.to(lora_update.dtype) + self.scaling * lora_update
+        
+        # normalize per expert per output neuron (direction)
+        # norm over input dim (dim=1)
+        direction = F.normalize(adapted_weight, dim=1)
+        
+        # apply magnitude: (num_experts, 1, out_dim) * (num_experts, in_dim, out_dim)
+        final_weight = dora.magnitude.unsqueeze(1) * direction
+        
+        # grouped matmul with composed weight
+        out = torch._grouped_mm(inputs, final_weight.to(inputs.dtype), cu_experts_count)
+        return out
 
     def moe(self, hidden_states: torch.Tensor, topk_indices: torch.Tensor, topk_weights: torch.Tensor):
         inputs = hidden_states
         M = hidden_states.shape[0]
         hidden_dim = hidden_states.shape[-1]
 
-        sort_indices = topk_indices.view(-1).argsort()  # (M * topk,)
+        sort_indices = topk_indices.view(-1).argsort()
         sorted_pos = sort_indices // self.top_k
-        grouped_inputs = inputs[sorted_pos]  # (M * topk, dim)
+        grouped_inputs = inputs[sorted_pos]
 
         experts_count = topk_indices.view(-1).bincount(minlength=self.num_experts)
         cu_experts_count = experts_count.cumsum(dim=0).to(torch.int32)
 
-        gate_out = torch._grouped_mm(
-            grouped_inputs,
-            self.gate_proj,
-            cu_experts_count,
-        )
-        if self.gate_lora is not None:
-            gate_out_lora_A = torch._grouped_mm(
-                grouped_inputs,
-                self.gate_lora.A,
-                cu_experts_count,
+        if self.gate_dora is not None:
+            gate_out = self._apply_dora_grouped(
+                grouped_inputs, self.gate_proj, self.gate_dora, cu_experts_count, experts_count
             )
-            gate_out_lora_B = torch._grouped_mm(
-                gate_out_lora_A,
-                self.gate_lora.B,
-                cu_experts_count,
-            )
-            gate_out = gate_out + gate_out_lora_B * self.alpha
+        else:
+            gate_out = torch._grouped_mm(grouped_inputs, self.gate_proj, cu_experts_count)
         
-        up_out = torch._grouped_mm(
-            grouped_inputs,
-            self.up_proj,
-            cu_experts_count,
-        )
-        if self.up_lora is not None:
-            up_out_lora_A = torch._grouped_mm(
-                grouped_inputs,
-                self.up_lora.A,
-                cu_experts_count,
+        if self.up_dora is not None:
+            up_out = self._apply_dora_grouped(
+                grouped_inputs, self.up_proj, self.up_dora, cu_experts_count, experts_count
             )
-            up_out_lora_B = torch._grouped_mm(
-                up_out_lora_A,
-                self.up_lora.B,
-                cu_experts_count,
-            )
-            up_out = up_out + up_out_lora_B * self.alpha
+        else:
+            up_out = torch._grouped_mm(grouped_inputs, self.up_proj, cu_experts_count)
 
         intermediate = self.act_fn(gate_out) * up_out
         
-        down_out = torch._grouped_mm(
-            intermediate,
-            self.down_proj,
-            cu_experts_count,
-        )
-
-        if self.down_lora is not None:
-            down_out_lora_A = torch._grouped_mm(
-                intermediate,
-                self.down_lora.A,
-                cu_experts_count,
+        if self.down_dora is not None:
+            down_out = self._apply_dora_grouped(
+                intermediate, self.down_proj, self.down_dora, cu_experts_count, experts_count
             )
-            down_out_lora_B = torch._grouped_mm(
-                down_out_lora_A,
-                self.down_lora.B,
-                cu_experts_count,
-            )
-            down_out = down_out + down_out_lora_B * self.alpha
+        else:
+            down_out = torch._grouped_mm(intermediate, self.down_proj, cu_experts_count)
 
         down_out = down_out * topk_weights.view(-1)[sort_indices].unsqueeze(-1)
 
@@ -275,7 +282,7 @@ class Glm4MoeMoEExpertParallel(nn.Module):
 
 modeling_glm4_moe.Glm4MoeMoE = Glm4MoeMoEExpertParallel
 
-class LinearLoRA(nn.Module):
+class LinearDoRA(nn.Module):
     def __init__(self, linear: nn.Linear, r=4, alpha=1.0):
         super().__init__()
         self.linear = linear
@@ -287,14 +294,24 @@ class LinearLoRA(nn.Module):
         self.lora_A = nn.Parameter(torch.zeros(r, in_features, dtype=torch.bfloat16))
         self.lora_B = nn.Parameter(torch.zeros(out_features, r, dtype=torch.bfloat16))
         
+        # magnitude vector initialized from pretrained weight norms
+        self.magnitude = nn.Parameter(linear.weight.norm(dim=1).to(torch.bfloat16))
+        
         with torch.no_grad():
             init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
             # lora_B stays zero
 
     def forward(self, x):
-        out = self.linear(x)
-        lora_out = F.linear(F.linear(x.to(self.lora_A.dtype), self.lora_A), self.lora_B) * self.scaling
-        return out + lora_out.to(out.dtype)
+        # adapted weight = W + scaling * BA
+        lora_update = self.lora_B @ self.lora_A  # (out, in)
+        adapted_weight = self.linear.weight.to(self.lora_A.dtype) + self.scaling * lora_update
+        
+        # normalize to direction, apply magnitude
+        direction = F.normalize(adapted_weight, dim=1)
+        final_weight = self.magnitude.unsqueeze(1) * direction
+        
+        out = F.linear(x.to(final_weight.dtype), final_weight, self.linear.bias)
+        return out.to(x.dtype)
         
 def check_fn(module):
     return isinstance(module, (Glm4MoeDecoderLayer, Glm4MoeMoEExpertParallel))
@@ -332,7 +349,7 @@ def main():
     batch_size = 1
     grad_accumulation = 4
     epoch = 3
-    checkpoint_dir = f'{model_name}_checkpoint'
+    checkpoint_dir = f'{model_name}_checkpoint_dora'
     os.makedirs(checkpoint_dir, exist_ok=True)
     
     model = Model.from_pretrained(
@@ -364,7 +381,7 @@ def main():
                 if 'mlp.experts' in name:
                     continue
     
-                lora = LinearLoRA(child, r=rank_lora, alpha=alpha_lora)
+                lora = LinearDoRA(child, r=rank_lora, alpha=alpha_lora)
                 setattr(module, child_name, lora)
     
     top_k = model.config.num_experts_per_tok
@@ -373,7 +390,7 @@ def main():
     
     for module in tqdm(model.modules()):
         if isinstance(module, Glm4MoeMoEExpertParallel):
-            module.apply_lora_stack(r=r, alpha=alpha)
+            module.apply_dora_stack(r=r, alpha=alpha)
 
     fsdp_kwargs = {}
     fsdp_kwargs["mp_policy"] = MixedPrecisionPolicy(

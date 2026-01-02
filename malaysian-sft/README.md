@@ -4,8 +4,8 @@ Low Rank SFT on https://huggingface.co/datasets/Scicom-intl/Malaysian-Instructio
 
 ## Ablation on multiple models
 
-1. Ablation on Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, openai/gpt-oss-120b, zai-org/GLM-4.5-Air and Qwen/Qwen3-30B-A3B-Instruct-2507
-2. Dense LoRA SFT done using DeepSpeed Zero3 HF Trainer while MoE LoRA SFT done using FSDP2 + Fused MoE except for GPT OSS.
+1. Ablation on Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, zai-org/GLM-4.5-Air and Qwen/Qwen3-30B-A3B-Instruct-2507
+2. Dense LoRA SFT done using DeepSpeed Zero3 HF Trainer while MoE LoRA SFT done using FSDP2 + Fused MoE
 3. Also tried DoRA for Qwen3 MoE and GLM 4.5 Air.
 4. Multipacking variable length 16384 context length, with global batch size of 32, so global total tokens is 524288.
 5. All linear layers with rank 256 with alpha multiply by 2.0, for MoE including experts <sup> + </sup>.
@@ -193,6 +193,36 @@ python3 malaymmlu.py --pattern "GLM-4.5-Air-lora-256-*" --num_gpus 8 --gpu_parti
 python3 calculate_malaymmlu.py --pattern "malaymmlu-GLM-4.5-Air-lora-256-*"
 ```
 
+```
+malaymmlu-GLM-4.5-Air-lora-256-944 72636
+malaymmlu-GLM-4.5-Air-lora-256-629 72633
+malaymmlu-GLM-4.5-Air-lora-256-314 72637
+
+malaymmlu-GLM-4.5-Air-lora-256-944
+STEM 0.7851002865329513 0.9136307818256242
+Language 0.7242366412213741 0.8904262086513995
+Social science 0.6905174906042209 0.869615495808037
+Others 0.6924922043655553 0.8829455504917246
+Humanities 0.7333333333333333 0.9089874857792947
+average 0.725135991211487 0.8931211045112158
+
+malaymmlu-GLM-4.5-Air-lora-256-629
+STEM 0.7896029471960704 0.90749079001228
+Language 0.7247137404580153 0.884382951653944
+Social science 0.6952876553917318 0.8577623590633131
+Others 0.7016071000239865 0.8774286399616215
+Humanities 0.7312855517633675 0.89419795221843
+average 0.7284993989666343 0.8842525385819175
+
+malaymmlu-GLM-4.5-Air-lora-256-314
+STEM 0.7580843225542366 0.9021694637740483
+Language 0.7096055979643766 0.8877226463104325
+Social science 0.6673894189071986 0.8639780283318879
+Others 0.6852962341088991 0.8851043415687215
+Humanities 0.714448236632537 0.8976109215017065
+average 0.7069647620334496 0.8873170802973593
+```
+
 ### Qwen/Qwen3-30B-A3B-Instruct-2507
 
 1. Finetune,
@@ -211,4 +241,34 @@ python3 malaymmlu.py --pattern "Qwen3-30B-A3B-Instruct-2507-lora-256-*" --num_gp
 
 ```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-Qwen3-30B-A3B-Instruct-2507-lora-256-*"
+```
+
+```
+malaymmlu-Qwen3-30B-A3B-Instruct-2507-lora-256-319 72632
+malaymmlu-Qwen3-30B-A3B-Instruct-2507-lora-256-959 72632
+malaymmlu-Qwen3-30B-A3B-Instruct-2507-lora-256-639 72630
+
+malaymmlu-Qwen3-30B-A3B-Instruct-2507-lora-256-319
+STEM 0.8125255832992223 0.9029881293491608
+Language 0.7536577608142494 0.8853371501272265
+Social science 0.6941312518068806 0.8407054061867592
+Others 0.731590309426721 0.8548812664907651
+Humanities 0.7588168373151308 0.8800910125142207
+average 0.7501443485324408 0.8728005929336264
+
+malaymmlu-Qwen3-30B-A3B-Instruct-2507-lora-256-959
+STEM 0.7994269340974212 0.9001227998362669
+Language 0.7646310432569975 0.8853371501272265
+Social science 0.7081526452732003 0.84027175484244
+Others 0.7395058767090429 0.8656752218757496
+Humanities 0.7592718998862343 0.8873720136518771
+average 0.7541976798445793 0.875755788066712
+
+malaymmlu-Qwen3-30B-A3B-Instruct-2507-lora-256-639
+STEM 0.8059762586983218 0.898894801473598
+Language 0.7631997455470738 0.8867684478371501
+Social science 0.7016478751084129 0.8396935530500145
+Others 0.7392660110338211 0.8731110578076278
+Humanities 0.756769055745165 0.8864618885096701
+average 0.7533717892265589 0.8769859497356121
 ```
