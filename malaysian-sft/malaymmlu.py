@@ -231,6 +231,9 @@ class MalayMMLUEvaluator:
         ]
 
     def _extract_answer(self, response: str) -> Optional[str]:
+        # print('------')
+        # print(response)
+        # print('------\n\n')
         matches = self.ANSWER_PATTERN.findall(response)
         return matches[0] if len(matches) == 1 else None
 
@@ -250,7 +253,7 @@ class MalayMMLUEvaluator:
                         continue
 
                     answer = self._extract_answer(response)
-                    if answer not in 'ABCDEF':
+                    if answer is not None and answer not in 'ABCDEF':
                         continue
                     break
                     

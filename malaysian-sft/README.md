@@ -156,4 +156,16 @@ average 0.7640102106039417 0.8764299932932479
 
 ### zai-org/GLM-4.5-Air
 
+1. Run generation,
+
+```bash
+python3 malaymmlu.py --pattern "ramdisk/GLM-4.5-Air-lora-256-*" --num_gpus 8 --gpu_partition 4
+```
+
+2. Calculate accuracy,
+
+```bash
+python3 calculate_malaymmlu.py --pattern "malaymmlu-GLM-4.5-Air-lora-256-*"
+```
+
 ### Qwen/Qwen3-30B-A3B-Instruct-2507

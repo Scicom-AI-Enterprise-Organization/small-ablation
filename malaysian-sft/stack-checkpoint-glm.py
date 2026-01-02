@@ -18,4 +18,4 @@ for module in tqdm(model.modules()):
 
         del module.experts
 
-model.save_pretrained('nfs/nfs/GLM-4.5-Air')
+model.save_pretrained('ramdisk/GLM-4.5-Air-stack')

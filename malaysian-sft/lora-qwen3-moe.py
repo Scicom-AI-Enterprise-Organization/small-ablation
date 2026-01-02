@@ -29,8 +29,10 @@ from transformers import (
     Qwen3MoeForCausalLM,
 )
 from transformers.models.qwen3_moe.modeling_qwen3_moe import (
+    Qwen3MoeAttention,
     Qwen3MoeMLP,
     Qwen3MoeDecoderLayer,
+    Qwen3MoeRMSNorm,
     load_balancing_loss_func,
     ACT2FN,
 )
@@ -316,19 +318,13 @@ class LinearLoRA(nn.Module):
         lora_out = F.linear(F.linear(x.to(self.lora_A.dtype), self.lora_A), self.lora_B) * self.scaling
         return out + lora_out.to(out.dtype)
 
-def check_fn(module):
-    return isinstance(module, (Qwen3MoeDecoderLayer, Qwen3MoeSparseMoeBlockParallel))
-
-non_reentrant_wrapper = partial(
-    checkpoint_wrapper,
-    checkpoint_impl=CheckpointImpl.NO_REENTRANT,
-)
-
 @click.command()
 @click.option('--model_name', default='ramdisk/Qwen3-30B-A3B-Instruct-2507-stack', help='model name')
 @click.option('--batch_size', default=4, help='batch size')
 @click.option('--grad_accumulation', default=1, help='gradient accumulation')
-def main(model_name, batch_size, grad_accumulation):
+@click.option('--dataset', default='multipacking-qwen3', help='dataset')
+@click.option('--deeper_fsdp', is_flag=True, help='deeper FSDP')
+def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
     rank = int(os.environ["LOCAL_RANK"])
     world_size = int(os.environ['WORLD_SIZE'])
     device_type = torch.accelerator.current_accelerator()
@@ -354,7 +350,6 @@ def main(model_name, batch_size, grad_accumulation):
     warmup_steps = 50
     learning_rate = 1e-4
     num_epoch = 3
-    dataset = 'multipacking-qwen3'
     batch_size = 4
     grad_accumulation = 1
 
@@ -382,7 +377,7 @@ def main(model_name, batch_size, grad_accumulation):
     rank_lora = 256
     alpha_lora = 512
 
-    for name, module in tqdm(model.named_modules()):
+    for name, module in tqdm(model.named_modules(), desc="LoRA linear"):
         for child_name, child in module.named_children():
             if len(child_name) and any([a in child_name for a in selected]) and isinstance(child, nn.Linear):
                 
@@ -396,7 +391,7 @@ def main(model_name, batch_size, grad_accumulation):
     r = rank_lora // top_k
     alpha = alpha_lora // top_k
     
-    for module in tqdm(model.modules()):
+    for module in tqdm(model.modules(), desc="apply lora stack"):
         if isinstance(module, Qwen3MoeSparseMoeBlockParallel):
             module.apply_lora_stack(r=r, alpha=alpha)
 
@@ -407,7 +402,34 @@ def main(model_name, batch_size, grad_accumulation):
     )
     fsdp_kwargs["mesh"] = dp_mesh
 
-    for module in tqdm(model.modules()):
+    if deeper_fsdp:
+        fsdp_kwargs["reshard_after_forward"] = True
+        checkpoint_modules = (
+            Qwen3MoeDecoderLayer, 
+            Qwen3MoeSparseMoeBlockParallel, 
+            Qwen3MoeAttention, 
+            Qwen3MoeMLP,
+        )
+
+        for name, module in tqdm(model.named_modules(), desc="deeper FSDP"):
+            if isinstance(module, checkpoint_modules[1:]):
+                try:
+                    fully_shard(module, **fsdp_kwargs)
+                except Exception as e:
+                    print(e, name)
+
+    else:
+        checkpoint_modules = (Qwen3MoeDecoderLayer,)
+
+    def check_fn(module):
+        return isinstance(module, checkpoint_modules)
+
+    non_reentrant_wrapper = partial(
+        checkpoint_wrapper,
+        checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+    )
+
+    for module in tqdm(model.modules(), desc="FSDP layer"):
         if isinstance(module, Qwen3MoeDecoderLayer):
             fully_shard(module, **fsdp_kwargs)
     fully_shard(model, **fsdp_kwargs)
@@ -518,6 +540,9 @@ def main(model_name, batch_size, grad_accumulation):
 
         if (step + 1) % steps_per_epoch == 0:
             print(f'saving checkpoint at {step}')
+
+            dist.barrier()
+
             sharded_sd = model.state_dict()
             cpu_state_dict = {}
             
@@ -536,6 +561,8 @@ def main(model_name, batch_size, grad_accumulation):
             
             if rank == 0:
                 torch.save(cpu_state_dict, os.path.join(checkpoint_dir, f'{step}-model_state_dict.pt'))
+
+            dist.barrier()
 
         step += 1
         pbar.update(1)

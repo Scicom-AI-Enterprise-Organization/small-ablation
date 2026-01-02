@@ -67,14 +67,6 @@ class Dataset(Dataset):
             data[k] = data[k].astype(np.int64)
 
         data['labels'] = data['input_ids'].copy()
-        attention_mask_sum = data['attention_mask'].sum()
-        
-        if attention_mask_sum < self.sequence_length:
-            balance = self.sequence_length - attention_mask_sum
-            data['input_ids'] = np.concatenate([data['input_ids'], np.array([151329] * balance)])
-            data['position_ids'] = np.concatenate([data['position_ids'], np.array([0] * balance)])
-            data['labels'] = np.concatenate([data['labels'], np.array([-100] * balance)])
-            data['attention_mask'] = np.concatenate([data['attention_mask'], np.array([balance])])
     
         return data
     
@@ -333,7 +325,7 @@ def main():
     dp_world_size = dp_mesh.size()
 
     set_seed(42)
-    model_name = "nfs/nfs/GLM-4.5-Air"
+    model_name = "ramdisk/GLM-4.5-Air-stack"
     warmup_steps = 50
     learning_rate = 1e-4
     dataset = 'multipacking-glm'
@@ -497,6 +489,9 @@ def main():
 
         if (step + 1) % steps_per_epoch == 0:
             print(f'saving checkpoint at {step}')
+
+            dist.barrier()
+            
             sharded_sd = model.state_dict()
             cpu_state_dict = {}
             
@@ -515,6 +510,8 @@ def main():
             
             if rank == 0:
                 torch.save(cpu_state_dict, os.path.join(checkpoint_dir, f'{step}-model_state_dict.pt'))
+
+            dist.barrier()
 
         step += 1
         pbar.update(1)
