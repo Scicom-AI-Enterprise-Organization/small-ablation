@@ -351,8 +351,6 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
     warmup_steps = 50
     learning_rate = 1e-4
     num_epoch = 3
-    batch_size = 4
-    grad_accumulation = 1
 
     os.makedirs(checkpoint_dir, exist_ok=True)
     
@@ -405,7 +403,7 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
 
     if deeper_fsdp:
         fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
-        fsdp_kwargs["reshard_after_forward"] = True
+        # fsdp_kwargs["reshard_after_forward"] = True
 
         checkpoint_modules = (
             Qwen3MoeDecoderLayer, 
@@ -504,20 +502,16 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
         t0 = time.time()
 
         loss_sum = 0.0
-
-        sync_context = model.no_sync() if deeper_fsdp else nullcontext()
-
-        with sync_context:
-            for b in batches:
-                for k in b.keys():
-                    if isinstance(b[k], torch.Tensor):
-                        b[k] = b[k].to(device, non_blocking=True)
-                
-                b['num_items_in_batch'] = torch.tensor(global_total_tokens)
-                out = model(**b, use_cache=False)
-                loss = out["loss"] * dp_world_size
-                loss.backward()
-                loss_sum += loss
+        for b in batches:
+            for k in b.keys():
+                if isinstance(b[k], torch.Tensor):
+                    b[k] = b[k].to(device, non_blocking=True)
+            
+            b['num_items_in_batch'] = torch.tensor(global_total_tokens)
+            out = model(**b, use_cache=False)
+            loss = out["loss"] * dp_world_size
+            loss.backward()
+            loss_sum += loss
 
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optim.step()

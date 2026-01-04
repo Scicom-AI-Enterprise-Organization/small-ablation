@@ -173,9 +173,9 @@ class Glm4MoeMoEExpertParallel(nn.Module):
         self.shared_experts = Glm4MoeMLP(
             config=config, intermediate_size=config.moe_intermediate_size * config.n_shared_experts
         )
-        self.gate_dora = None
-        self.up_dora = None
-        self.down_dora = None
+        self.gate_lora = None
+        self.up_lora = None
+        self.down_lora = None
     
     def apply_dora_stack(self, r, alpha):
         if self._is_stacked:
@@ -185,20 +185,20 @@ class Glm4MoeMoEExpertParallel(nn.Module):
         self.scaling = alpha / r
         self._is_stacked = True
 
-        self.gate_dora = ExpertDoRAWeights(
+        self.gate_lora = ExpertDoRAWeights(
             self.num_experts, self.gate_proj.shape[1], self.gate_proj.shape[2], r
         )
-        self.up_dora = ExpertDoRAWeights(
+        self.up_lora = ExpertDoRAWeights(
             self.num_experts, self.up_proj.shape[1], self.up_proj.shape[2], r
         )
-        self.down_dora = ExpertDoRAWeights(
+        self.down_lora = ExpertDoRAWeights(
             self.num_experts, self.down_proj.shape[1], self.down_proj.shape[2], r
         )
         
         # initialize magnitudes from pretrained weights
-        self.gate_dora.init_magnitude_from_weight(self.gate_proj.data)
-        self.up_dora.init_magnitude_from_weight(self.up_proj.data)
-        self.down_dora.init_magnitude_from_weight(self.down_proj.data)
+        self.gate_lora.init_magnitude_from_weight(self.gate_proj.data)
+        self.up_lora.init_magnitude_from_weight(self.up_proj.data)
+        self.down_lora.init_magnitude_from_weight(self.down_proj.data)
 
     def _apply_dora_grouped(
         self,
@@ -240,25 +240,25 @@ class Glm4MoeMoEExpertParallel(nn.Module):
         experts_count = topk_indices.view(-1).bincount(minlength=self.num_experts)
         cu_experts_count = experts_count.cumsum(dim=0).to(torch.int32)
 
-        if self.gate_dora is not None:
+        if self.gate_lora is not None:
             gate_out = self._apply_dora_grouped(
-                grouped_inputs, self.gate_proj, self.gate_dora, cu_experts_count, experts_count
+                grouped_inputs, self.gate_proj, self.gate_lora, cu_experts_count, experts_count
             )
         else:
             gate_out = torch._grouped_mm(grouped_inputs, self.gate_proj, cu_experts_count)
         
-        if self.up_dora is not None:
+        if self.up_lora is not None:
             up_out = self._apply_dora_grouped(
-                grouped_inputs, self.up_proj, self.up_dora, cu_experts_count, experts_count
+                grouped_inputs, self.up_proj, self.up_lora, cu_experts_count, experts_count
             )
         else:
             up_out = torch._grouped_mm(grouped_inputs, self.up_proj, cu_experts_count)
 
         intermediate = self.act_fn(gate_out) * up_out
         
-        if self.down_dora is not None:
+        if self.down_lora is not None:
             down_out = self._apply_dora_grouped(
-                intermediate, self.down_proj, self.down_dora, cu_experts_count, experts_count
+                intermediate, self.down_proj, self.down_lora, cu_experts_count, experts_count
             )
         else:
             down_out = torch._grouped_mm(intermediate, self.down_proj, cu_experts_count)
@@ -437,6 +437,12 @@ def main():
         num_training_steps=total_steps
     )
 
+    if rank == 0:
+        sharded_sd = model.state_dict()
+        for param_name, sharded_param in sharded_sd.items():
+            if 'lora' in param_name or 'dora' in param_name or 'magnitude' in param_name:
+                print(param_name)
+
     step = 0
     pbar = tqdm(total=total_steps, initial=step)
     iter_train_loader = iter(train_loader)
@@ -520,7 +526,7 @@ def main():
                         print(f'{param_name} is not sharded')
                     full_param = sharded_param
 
-                if rank == 0 and 'lora' in param_name:
+                if rank == 0 and ('lora' in param_name or 'dora' in param_name or 'magnitude' in param_name):
                     cpu_state_dict[param_name] = full_param.cpu()
                 else:
                     del full_param

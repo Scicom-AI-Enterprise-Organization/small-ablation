@@ -158,15 +158,24 @@ class Model(Qwen3MoeForCausalLM):
             return {'loss': loss}
         return super_out
 
-class ExpertLoRAWeights(nn.Module):
-    """Wrapper to make expert LoRA weights more FSDP-friendly"""
+class ExpertDoRAWeights(nn.Module):
+    """Wrapper to make expert DoRA weights more FSDP-friendly"""
     def __init__(self, num_experts, in_dim, out_dim, r, dtype=torch.bfloat16):
         super().__init__()
         self.A = nn.Parameter(torch.zeros(num_experts, in_dim, r, dtype=dtype))
         self.B = nn.Parameter(torch.zeros(num_experts, r, out_dim, dtype=dtype))
+        # magnitude per expert per output neuron: (num_experts, out_dim)
+        self.magnitude = nn.Parameter(torch.ones(num_experts, out_dim, dtype=dtype))
         
         with torch.no_grad():
             init.kaiming_uniform_(self.A, a=math.sqrt(5))
+    
+    def init_magnitude_from_weight(self, weight: torch.Tensor):
+        """Initialize magnitude from pretrained weight norms. weight: (num_experts, in_dim, out_dim)"""
+        with torch.no_grad():
+            # norm over input dim for each expert's output neuron
+            norms = weight.norm(dim=1)  # (num_experts, out_dim)
+            self.magnitude.copy_(norms.to(self.magnitude.dtype))
 
 class Qwen3MoeSparseMoeBlockParallel(nn.Module):
     def __init__(self, config):
@@ -182,25 +191,56 @@ class Qwen3MoeSparseMoeBlockParallel(nn.Module):
         self._is_stacked = False
         self.act_fn = ACT2FN[config.hidden_act]
     
-    def apply_lora_stack(self, r, alpha):
+    def apply_dora_stack(self, r, alpha):
         if self._is_stacked:
             return
 
         self.r = r
-        self.alpha = alpha
-        self.alpha = alpha / r
-        
+        self.scaling = alpha / r
         self._is_stacked = True
 
-        self.gate_lora = ExpertLoRAWeights(
+        self.gate_lora = ExpertDoRAWeights(
             self.num_experts, self.gate_proj.shape[1], self.gate_proj.shape[2], r
         )
-        self.up_lora = ExpertLoRAWeights(
+        self.up_lora = ExpertDoRAWeights(
             self.num_experts, self.up_proj.shape[1], self.up_proj.shape[2], r
         )
-        self.down_lora = ExpertLoRAWeights(
+        self.down_lora = ExpertDoRAWeights(
             self.num_experts, self.down_proj.shape[1], self.down_proj.shape[2], r
         )
+        
+        # initialize magnitudes from pretrained weights
+        self.gate_lora.init_magnitude_from_weight(self.gate_proj.data)
+        self.up_lora.init_magnitude_from_weight(self.up_proj.data)
+        self.down_lora.init_magnitude_from_weight(self.down_proj.data)
+    
+    def _apply_dora_grouped(
+        self,
+        inputs: torch.Tensor,
+        base_weight: torch.Tensor,
+        dora: ExpertDoRAWeights,
+        cu_experts_count: torch.Tensor,
+        experts_count: torch.Tensor,
+    ):
+        """
+        Apply DoRA with grouped_mm.
+        inputs: (M * topk, in_dim)
+        base_weight: (num_experts, in_dim, out_dim)
+        """
+        # compute adapted weight = W + scaling * A @ B
+        lora_update = torch.bmm(dora.A, dora.B)  # (num_experts, in_dim, out_dim)
+        adapted_weight = base_weight.to(lora_update.dtype) + self.scaling * lora_update
+        
+        # normalize per expert per output neuron (direction)
+        # norm over input dim (dim=1)
+        direction = F.normalize(adapted_weight, dim=1)
+        
+        # apply magnitude: (num_experts, 1, out_dim) * (num_experts, in_dim, out_dim)
+        final_weight = dora.magnitude.unsqueeze(1) * direction
+        
+        # grouped matmul with composed weight
+        out = torch._grouped_mm(inputs, final_weight.to(inputs.dtype), cu_experts_count)
+        return out
 
     def moe(self, hidden_states: torch.Tensor, topk_indices: torch.Tensor, topk_weights: torch.Tensor):
         M = hidden_states.shape[0]
@@ -213,61 +253,28 @@ class Qwen3MoeSparseMoeBlockParallel(nn.Module):
         experts_count = topk_indices.view(-1).bincount(minlength=self.num_experts)
         cu_experts_count = experts_count.cumsum(dim=0).to(torch.int32)
 
-        gate_out = torch._grouped_mm(
-            grouped_inputs,
-            self.gate_proj,
-            cu_experts_count,
-        )
         if self.gate_lora is not None:
-            gate_out_lora_A = torch._grouped_mm(
-                grouped_inputs,
-                self.gate_lora.A,
-                cu_experts_count,
+            gate_out = self._apply_dora_grouped(
+                grouped_inputs, self.gate_proj, self.gate_lora, cu_experts_count, experts_count
             )
-            gate_out_lora_B = torch._grouped_mm(
-                gate_out_lora_A,
-                self.gate_lora.B,
-                cu_experts_count,
-            )
-            gate_out = gate_out + gate_out_lora_B * self.alpha
+        else:
+            gate_out = torch._grouped_mm(grouped_inputs, self.gate_proj, cu_experts_count)
         
-        up_out = torch._grouped_mm(
-            grouped_inputs,
-            self.up_proj,
-            cu_experts_count,
-        )
         if self.up_lora is not None:
-            up_out_lora_A = torch._grouped_mm(
-                grouped_inputs,
-                self.up_lora.A,
-                cu_experts_count,
+            up_out = self._apply_dora_grouped(
+                grouped_inputs, self.up_proj, self.up_lora, cu_experts_count, experts_count
             )
-            up_out_lora_B = torch._grouped_mm(
-                up_out_lora_A,
-                self.up_lora.B,
-                cu_experts_count,
-            )
-            up_out = up_out + up_out_lora_B * self.alpha
+        else:
+            up_out = torch._grouped_mm(grouped_inputs, self.up_proj, cu_experts_count)
 
         intermediate = self.act_fn(gate_out) * up_out
         
-        down_out = torch._grouped_mm(
-            intermediate,
-            self.down_proj,
-            cu_experts_count,
-        )
         if self.down_lora is not None:
-            down_out_lora_A = torch._grouped_mm(
-                intermediate,
-                self.down_lora.A,
-                cu_experts_count,
+            down_out = self._apply_dora_grouped(
+                intermediate, self.down_proj, self.down_lora, cu_experts_count, experts_count
             )
-            down_out_lora_B = torch._grouped_mm(
-                down_out_lora_A,
-                self.down_lora.B,
-                cu_experts_count,
-            )
-            down_out = down_out + down_out_lora_B * self.alpha
+        else:
+            down_out = torch._grouped_mm(intermediate, self.down_proj, cu_experts_count)
 
         down_out = down_out * topk_weights.view(-1)[sort_indices].unsqueeze(-1)
 
@@ -298,7 +305,7 @@ class Qwen3MoeSparseMoeBlockParallel(nn.Module):
 
 modeling_qwen3_moe.Qwen3MoeSparseMoeBlock = Qwen3MoeSparseMoeBlockParallel
 
-class LinearLoRA(nn.Module):
+class LinearDoRA(nn.Module):
     def __init__(self, linear: nn.Linear, r=4, alpha=1.0):
         super().__init__()
         self.linear = linear
@@ -310,14 +317,24 @@ class LinearLoRA(nn.Module):
         self.lora_A = nn.Parameter(torch.zeros(r, in_features, dtype=torch.bfloat16))
         self.lora_B = nn.Parameter(torch.zeros(out_features, r, dtype=torch.bfloat16))
         
+        # magnitude vector initialized from pretrained weight norms
+        self.magnitude = nn.Parameter(linear.weight.norm(dim=1).to(torch.bfloat16))
+        
         with torch.no_grad():
             init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
             # lora_B stays zero
 
     def forward(self, x):
-        out = self.linear(x)
-        lora_out = F.linear(F.linear(x.to(self.lora_A.dtype), self.lora_A), self.lora_B) * self.scaling
-        return out + lora_out.to(out.dtype)
+        # adapted weight = W + scaling * BA
+        lora_update = self.lora_B @ self.lora_A  # (out, in)
+        adapted_weight = self.linear.weight.to(self.lora_A.dtype) + self.scaling * lora_update
+        
+        # normalize to direction, apply magnitude
+        direction = F.normalize(adapted_weight, dim=1)
+        final_weight = self.magnitude.unsqueeze(1) * direction
+        
+        out = F.linear(x.to(final_weight.dtype), final_weight, self.linear.bias)
+        return out.to(x.dtype)
 
 @click.command()
 @click.option('--model_name', default='ramdisk/Qwen3-30B-A3B-Instruct-2507-stack', help='model name')
@@ -385,7 +402,7 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
                 if 'mlp.experts' in name:
                     continue
     
-                lora = LinearLoRA(child, r=rank_lora, alpha=alpha_lora)
+                lora = LinearDoRA(child, r=rank_lora, alpha=alpha_lora)
                 setattr(module, child_name, lora)
 
     top_k = model.config.num_experts_per_tok
@@ -394,7 +411,7 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
     
     for module in tqdm(model.modules(), desc="apply lora stack"):
         if isinstance(module, Qwen3MoeSparseMoeBlockParallel):
-            module.apply_lora_stack(r=r, alpha=alpha)
+            module.apply_dora_stack(r=r, alpha=alpha)
 
     fsdp_kwargs = {}
     fsdp_kwargs["mp_policy"] = MixedPrecisionPolicy(
@@ -470,9 +487,10 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
     )
 
     if rank == 0:
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                print(name, param.size(), param.dtype)
+        sharded_sd = model.state_dict()
+        for param_name, sharded_param in sharded_sd.items():
+            if 'lora' in param_name or 'dora' in param_name or 'magnitude' in param_name:
+                print(param_name)
 
     step = 0
     pbar = tqdm(total=total_steps, initial=step)
@@ -504,20 +522,16 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
         t0 = time.time()
 
         loss_sum = 0.0
-
-        sync_context = model.no_sync() if deeper_fsdp else nullcontext()
-
-        with sync_context:
-            for b in batches:
-                for k in b.keys():
-                    if isinstance(b[k], torch.Tensor):
-                        b[k] = b[k].to(device, non_blocking=True)
-                
-                b['num_items_in_batch'] = torch.tensor(global_total_tokens)
-                out = model(**b, use_cache=False)
-                loss = out["loss"] * dp_world_size
-                loss.backward()
-                loss_sum += loss
+        for b in batches:
+            for k in b.keys():
+                if isinstance(b[k], torch.Tensor):
+                    b[k] = b[k].to(device, non_blocking=True)
+            
+            b['num_items_in_batch'] = torch.tensor(global_total_tokens)
+            out = model(**b, use_cache=False)
+            loss = out["loss"] * dp_world_size
+            loss.backward()
+            loss_sum += loss
 
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optim.step()
@@ -561,7 +575,7 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
                         print(f'{param_name} is not sharded')
                     full_param = sharded_param
 
-                if rank == 0 and 'lora' in param_name:
+                if rank == 0 and ('lora' in param_name or 'dora' in param_name or 'magnitude' in param_name):
                     cpu_state_dict[param_name] = full_param.cpu()
                 else:
                     del full_param
