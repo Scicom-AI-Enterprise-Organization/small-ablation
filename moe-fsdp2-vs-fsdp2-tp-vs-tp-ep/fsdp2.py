@@ -324,8 +324,7 @@ class LinearLoRA(nn.Module):
 @click.option('--batch_size', default=4, help='batch size')
 @click.option('--grad_accumulation', default=1, help='gradient accumulation')
 @click.option('--dataset', default='multipacking-qwen3', help='dataset')
-@click.option('--deeper_fsdp', is_flag=True, help='deeper FSDP')
-def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
+def main(model_name, batch_size, grad_accumulation, dataset):
     rank = int(os.environ["LOCAL_RANK"])
     world_size = int(os.environ['WORLD_SIZE'])
     device_type = torch.accelerator.current_accelerator()
@@ -346,10 +345,13 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
     dp_world_size = dp_mesh.size()
 
     set_seed(42)
+    model_name = "ramdisk/Qwen3-30B-A3B-Instruct-2507-stack"
     checkpoint_dir = model_name.replace('/', '-')
     warmup_steps = 50
     learning_rate = 1e-4
     num_epoch = 3
+    batch_size = 4
+    grad_accumulation = 1
 
     os.makedirs(checkpoint_dir, exist_ok=True)
     
@@ -399,27 +401,7 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
         reduce_dtype=torch.float32,
     )
     fsdp_kwargs["mesh"] = dp_mesh
-
-    if deeper_fsdp:
-        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
-        # fsdp_kwargs["reshard_after_forward"] = True
-
-        checkpoint_modules = (
-            Qwen3MoeDecoderLayer, 
-            Qwen3MoeSparseMoeBlockParallel, 
-            Qwen3MoeAttention, 
-            Qwen3MoeMLP,
-        )
-
-        for name, module in tqdm(model.named_modules(), desc="deeper FSDP"):
-            if isinstance(module, checkpoint_modules[1:]):
-                try:
-                    fully_shard(module, **fsdp_kwargs)
-                except Exception as e:
-                    print(e, name)
-
-    else:
-        checkpoint_modules = (Qwen3MoeDecoderLayer,)
+    checkpoint_modules = (Qwen3MoeDecoderLayer,)
 
     def check_fn(module):
         return isinstance(module, checkpoint_modules)
@@ -439,7 +421,7 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
         checkpoint_wrapper_fn=non_reentrant_wrapper,
         check_fn=check_fn,
     )
-    # model = torch.compile(model)
+    model = torch.compile(model)
 
     dataset = Dataset(dataset)
     sampler = DistributedSampler(
@@ -537,32 +519,6 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
                 wandb.log(scalar_dict)
             except Exception as e:
                 print('failed pushed to wandb', e)
-
-        if (step + 1) % steps_per_epoch == 0:
-            print(f'saving checkpoint at {step}')
-
-            dist.barrier()
-
-            sharded_sd = model.state_dict()
-            cpu_state_dict = {}
-            
-            for param_name, sharded_param in sharded_sd.items():
-                try:
-                    full_param = sharded_param.full_tensor()
-                except:
-                    if rank == 0:
-                        print(f'{param_name} is not sharded')
-                    full_param = sharded_param
-
-                if rank == 0 and 'lora' in param_name:
-                    cpu_state_dict[param_name] = full_param.cpu()
-                else:
-                    del full_param
-            
-            if rank == 0:
-                torch.save(cpu_state_dict, os.path.join(checkpoint_dir, f'{step}-model_state_dict.pt'))
-
-            dist.barrier()
 
         step += 1
         pbar.update(1)

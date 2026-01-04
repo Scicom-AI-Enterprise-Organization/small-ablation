@@ -162,6 +162,7 @@ class ExpertLoRAWeights(nn.Module):
 def _to_column_major(x: torch.Tensor) -> torch.Tensor:
     return x.transpose(-1, -2).contiguous()
 
+# same as https://github.com/pytorch/torchtitan/blob/main/torchtitan/models/moe/utils.py#L19
 def pad_for_alignment(grouped_inputs, experts_count, alignment=16):
     """Pad inputs so each expert group is aligned. Returns padding context for reuse."""
     experts_count_padded = ((experts_count + alignment - 1) // alignment) * alignment
@@ -439,12 +440,17 @@ def main():
                 return False
         return True
 
-    config = Float8LinearConfig.from_recipe_name(
-        "rowwise",
-        enable_fsdp_float8_all_gather=True,
-    )
+    # config = Float8LinearConfig.from_recipe_name(
+    #     "rowwise",
+    #     enable_fsdp_float8_all_gather=True,
+    # )
     # https://github.com/pytorch/torchtitan/pull/1108/files
-    torch._inductor.config.emulate_precision_casts = True
+    # torch._inductor.config.emulate_precision_casts = True
+
+    config = Float8LinearConfig(
+        enable_fsdp_float8_all_gather=True,
+        emulate=True,
+    )
     convert_to_float8_training(model, config=config, module_filter_fn=module_filter_fn)
 
     fsdp_kwargs = {}

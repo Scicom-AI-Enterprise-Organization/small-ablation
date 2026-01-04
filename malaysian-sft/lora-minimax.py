@@ -28,23 +28,23 @@ from transformers import (
     AutoTokenizer,
     Qwen3MoeForCausalLM,
 )
-from transformers.models.qwen3_moe.modeling_qwen3_moe import (
-    Qwen3MoeAttention,
-    Qwen3MoeMLP,
-    Qwen3MoeDecoderLayer,
-    Qwen3MoeRMSNorm,
-    load_balancing_loss_func,
+import modeling_minimax_m2
+from modeling_minimax_m2 import (
+    MiniMaxM2DecoderLayer,
+    MiniMaxM2MLP,
+    MiniMaxM2Experts,
+    MiniMaxM2SparseMoeBlock,
+    MiniMaxM2Attention,
     ACT2FN,
+    load_balancing_loss_func,
+    MiniMaxM2ForCausalLM,
 )
-from transformers.models.qwen3_moe import modeling_qwen3_moe
 from liger_kernel.transformers import LigerFusedLinearCrossEntropyLoss
 from streaming import LocalDataset
 from streaming.base.format.mds.encodings import Encoding, _encodings
 from tqdm import tqdm
 import numpy as np
 import wandb
-import click
-from contextlib import nullcontext
 
 class UInt32(Encoding):
     def encode(self, obj) -> bytes:
@@ -109,7 +109,7 @@ def collator(batch):
         'max_length_k': max_seqlen_q
     }
 
-class Model(Qwen3MoeForCausalLM):
+class Model(MiniMaxM2ForCausalLM):
     def __init__(self, config):
         super().__init__(config)
         self.loss = LigerFusedLinearCrossEntropyLoss(reduction="sum")
@@ -168,135 +168,121 @@ class ExpertLoRAWeights(nn.Module):
         with torch.no_grad():
             init.kaiming_uniform_(self.A, a=math.sqrt(5))
 
-class Qwen3MoeSparseMoeBlockParallel(nn.Module):
+class MiniMaxM2SparseMoeBlockFused(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.num_experts = config.num_experts
+        self.num_experts = config.num_local_experts
         self.top_k = config.num_experts_per_tok
-        self.norm_topk_prob = config.norm_topk_prob
+        self.jitter_noise = config.router_jitter_noise
+        self.hidden_size = config.hidden_size
+        self.ffn_dim = config.intermediate_size
 
-        self.gate = nn.Linear(config.hidden_size, config.num_experts, bias=False)
-        self.gate_proj = nn.Parameter(torch.zeros(self.num_experts, config.hidden_size, config.moe_intermediate_size))
-        self.up_proj = nn.Parameter(torch.zeros(self.num_experts, config.hidden_size, config.moe_intermediate_size))
-        self.down_proj = nn.Parameter(torch.zeros(self.num_experts, config.moe_intermediate_size, config.hidden_size))
-        self._is_stacked = False
+        self.gate = nn.Linear(config.hidden_size, config.num_local_experts, bias=False)
+        
+        # Stacked expert weights: (num_experts, in_dim, out_dim)
+        self.w1 = nn.Parameter(torch.zeros(self.num_experts, self.hidden_size, self.ffn_dim))
+        self.w2 = nn.Parameter(torch.zeros(self.num_experts, self.ffn_dim, self.hidden_size))
+        self.w3 = nn.Parameter(torch.zeros(self.num_experts, self.hidden_size, self.ffn_dim))
+        
+        self.register_buffer("e_score_correction_bias", torch.zeros(config.num_local_experts))
         self.act_fn = ACT2FN[config.hidden_act]
-    
+        
+        self._is_lora_applied = False
+        self.w1_lora = None
+        self.w2_lora = None
+        self.w3_lora = None
+
     def apply_lora_stack(self, r, alpha):
-        if self._is_stacked:
+        if self._is_lora_applied:
             return
 
         self.r = r
-        self.alpha = alpha
-        self.alpha = alpha / r
-        
-        self._is_stacked = True
+        self.lora_alpha = alpha / r
+        self._is_lora_applied = True
 
-        self.gate_lora = ExpertLoRAWeights(
-            self.num_experts, self.gate_proj.shape[1], self.gate_proj.shape[2], r
+        self.w1_lora = ExpertLoRAWeights(
+            self.num_experts, self.w1.shape[1], self.w1.shape[2], r
         )
-        self.up_lora = ExpertLoRAWeights(
-            self.num_experts, self.up_proj.shape[1], self.up_proj.shape[2], r
+        self.w2_lora = ExpertLoRAWeights(
+            self.num_experts, self.w2.shape[1], self.w2.shape[2], r
         )
-        self.down_lora = ExpertLoRAWeights(
-            self.num_experts, self.down_proj.shape[1], self.down_proj.shape[2], r
+        self.w3_lora = ExpertLoRAWeights(
+            self.num_experts, self.w3.shape[1], self.w3.shape[2], r
         )
 
-    def moe(self, hidden_states: torch.Tensor, topk_indices: torch.Tensor, topk_weights: torch.Tensor):
+    def route_tokens_to_experts(self, router_logits):
+        routing_weights = torch.sigmoid(router_logits.float())
+        scores_for_choice = routing_weights + self.e_score_correction_bias
+        _, top_k_index = torch.topk(scores_for_choice, self.top_k, dim=-1, sorted=False)
+        top_k_weights = routing_weights.gather(1, top_k_index)
+        top_k_weights = top_k_weights / top_k_weights.sum(dim=-1, keepdim=True)
+        return top_k_index, top_k_weights.to(router_logits.dtype)
+
+    def moe_forward(self, hidden_states: torch.Tensor, topk_indices: torch.Tensor, topk_weights: torch.Tensor):
         M = hidden_states.shape[0]
         hidden_dim = hidden_states.shape[-1]
 
-        sort_indices = topk_indices.view(-1).argsort()  # (M * topk,)
+        # Sort tokens by expert assignment
+        sort_indices = topk_indices.view(-1).argsort()
         sorted_pos = sort_indices // self.top_k
-        grouped_inputs = hidden_states[sorted_pos]  # (M * topk, hidden_dim)
+        grouped_inputs = hidden_states[sorted_pos]
 
+        # Compute cumulative expert counts for grouped_mm
         experts_count = topk_indices.view(-1).bincount(minlength=self.num_experts)
         cu_experts_count = experts_count.cumsum(dim=0).to(torch.int32)
 
-        gate_out = torch._grouped_mm(
-            grouped_inputs,
-            self.gate_proj,
-            cu_experts_count,
-        )
-        if self.gate_lora is not None:
-            gate_out_lora_A = torch._grouped_mm(
-                grouped_inputs,
-                self.gate_lora.A,
-                cu_experts_count,
-            )
-            gate_out_lora_B = torch._grouped_mm(
-                gate_out_lora_A,
-                self.gate_lora.B,
-                cu_experts_count,
-            )
-            gate_out = gate_out + gate_out_lora_B * self.alpha
-        
-        up_out = torch._grouped_mm(
-            grouped_inputs,
-            self.up_proj,
-            cu_experts_count,
-        )
-        if self.up_lora is not None:
-            up_out_lora_A = torch._grouped_mm(
-                grouped_inputs,
-                self.up_lora.A,
-                cu_experts_count,
-            )
-            up_out_lora_B = torch._grouped_mm(
-                up_out_lora_A,
-                self.up_lora.B,
-                cu_experts_count,
-            )
-            up_out = up_out + up_out_lora_B * self.alpha
+        # w1 (gate) projection
+        w1_out = torch._grouped_mm(grouped_inputs, self.w1, cu_experts_count)
+        if self.w1_lora is not None:
+            w1_lora_A = torch._grouped_mm(grouped_inputs, self.w1_lora.A, cu_experts_count)
+            w1_lora_B = torch._grouped_mm(w1_lora_A, self.w1_lora.B, cu_experts_count)
+            w1_out = w1_out + w1_lora_B * self.lora_alpha
 
-        intermediate = self.act_fn(gate_out) * up_out
-        
-        down_out = torch._grouped_mm(
-            intermediate,
-            self.down_proj,
-            cu_experts_count,
-        )
-        if self.down_lora is not None:
-            down_out_lora_A = torch._grouped_mm(
-                intermediate,
-                self.down_lora.A,
-                cu_experts_count,
-            )
-            down_out_lora_B = torch._grouped_mm(
-                down_out_lora_A,
-                self.down_lora.B,
-                cu_experts_count,
-            )
-            down_out = down_out + down_out_lora_B * self.alpha
+        # w3 (up) projection
+        w3_out = torch._grouped_mm(grouped_inputs, self.w3, cu_experts_count)
+        if self.w3_lora is not None:
+            w3_lora_A = torch._grouped_mm(grouped_inputs, self.w3_lora.A, cu_experts_count)
+            w3_lora_B = torch._grouped_mm(w3_lora_A, self.w3_lora.B, cu_experts_count)
+            w3_out = w3_out + w3_lora_B * self.lora_alpha
 
-        down_out = down_out * topk_weights.view(-1)[sort_indices].unsqueeze(-1)
+        # SwiGLU / activation
+        intermediate = self.act_fn(w1_out) * w3_out
 
+        # w2 (down) projection
+        w2_out = torch._grouped_mm(intermediate, self.w2, cu_experts_count)
+        if self.w2_lora is not None:
+            w2_lora_A = torch._grouped_mm(intermediate, self.w2_lora.A, cu_experts_count)
+            w2_lora_B = torch._grouped_mm(w2_lora_A, self.w2_lora.B, cu_experts_count)
+            w2_out = w2_out + w2_lora_B * self.lora_alpha
+
+        # Apply routing weights
+        w2_out = w2_out * topk_weights.view(-1)[sort_indices].unsqueeze(-1)
+
+        # Scatter back to original positions
         outputs = hidden_states.new_zeros(M, hidden_dim)
         sorted_pos_expanded = sorted_pos.unsqueeze(-1).expand(-1, hidden_dim)
-        outputs.scatter_add_(0, sorted_pos_expanded, down_out.to(outputs.dtype))
+        outputs.scatter_add_(0, sorted_pos_expanded, w2_out.to(outputs.dtype))
 
         return outputs
-    
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+
+    def forward(self, hidden_states: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, sequence_length, hidden_dim = hidden_states.shape
+        
+        if self.training and self.jitter_noise > 0:
+            hidden_states = hidden_states * torch.empty_like(hidden_states).uniform_(
+                1.0 - self.jitter_noise, 1.0 + self.jitter_noise
+            )
+        
         hidden_states_flat = hidden_states.view(-1, hidden_dim)
-        
         router_logits = self.gate(hidden_states_flat)
-
-        routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
-        routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
+        top_k_index, top_k_weights = self.route_tokens_to_experts(router_logits)
         
-        if self.norm_topk_prob:
-            routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+        hidden_states_out = self.moe_forward(hidden_states_flat, top_k_index, top_k_weights)
+        hidden_states_out = hidden_states_out.reshape(batch_size, sequence_length, hidden_dim)
         
-        routing_weights = routing_weights.to(hidden_states.dtype)
+        return hidden_states_out, router_logits
 
-        final_hidden_states = self.moe(hidden_states_flat, selected_experts, routing_weights)
-        
-        final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
-        return final_hidden_states, router_logits
-
-modeling_qwen3_moe.Qwen3MoeSparseMoeBlock = Qwen3MoeSparseMoeBlockParallel
+modeling_minimax_m2.MiniMaxM2SparseMoeBlock = MiniMaxM2SparseMoeBlockFused
 
 class LinearLoRA(nn.Module):
     def __init__(self, linear: nn.Linear, r=4, alpha=1.0):
@@ -319,13 +305,7 @@ class LinearLoRA(nn.Module):
         lora_out = F.linear(F.linear(x.to(self.lora_A.dtype), self.lora_A), self.lora_B) * self.scaling
         return out + lora_out.to(out.dtype)
 
-@click.command()
-@click.option('--model_name', default='ramdisk/Qwen3-30B-A3B-Instruct-2507-stack', help='model name')
-@click.option('--batch_size', default=4, help='batch size')
-@click.option('--grad_accumulation', default=1, help='gradient accumulation')
-@click.option('--dataset', default='multipacking-qwen3', help='dataset')
-@click.option('--deeper_fsdp', is_flag=True, help='deeper FSDP')
-def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
+def main():
     rank = int(os.environ["LOCAL_RANK"])
     world_size = int(os.environ['WORLD_SIZE'])
     device_type = torch.accelerator.current_accelerator()
@@ -346,10 +326,14 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
     dp_world_size = dp_mesh.size()
 
     set_seed(42)
+    model_name = ""
     checkpoint_dir = model_name.replace('/', '-')
     warmup_steps = 50
     learning_rate = 1e-4
     num_epoch = 3
+    batch_size = 1
+    grad_accumulation = 4
+    dataset = "multipacking-minimax"
 
     os.makedirs(checkpoint_dir, exist_ok=True)
     
@@ -390,7 +374,7 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
     alpha = alpha_lora // top_k
     
     for module in tqdm(model.modules(), desc="apply lora stack"):
-        if isinstance(module, Qwen3MoeSparseMoeBlockParallel):
+        if isinstance(module, MiniMaxM2SparseMoeBlockFused):
             module.apply_lora_stack(r=r, alpha=alpha)
 
     fsdp_kwargs = {}
@@ -399,27 +383,21 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
         reduce_dtype=torch.float32,
     )
     fsdp_kwargs["mesh"] = dp_mesh
+    fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
 
-    if deeper_fsdp:
-        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
-        # fsdp_kwargs["reshard_after_forward"] = True
+    checkpoint_modules = (
+        MiniMaxM2DecoderLayer, 
+        MiniMaxM2SparseMoeBlockFused, 
+        MiniMaxM2Attention, 
+        MiniMaxM2MLP,
+    )
 
-        checkpoint_modules = (
-            Qwen3MoeDecoderLayer, 
-            Qwen3MoeSparseMoeBlockParallel, 
-            Qwen3MoeAttention, 
-            Qwen3MoeMLP,
-        )
-
-        for name, module in tqdm(model.named_modules(), desc="deeper FSDP"):
-            if isinstance(module, checkpoint_modules[1:]):
-                try:
-                    fully_shard(module, **fsdp_kwargs)
-                except Exception as e:
-                    print(e, name)
-
-    else:
-        checkpoint_modules = (Qwen3MoeDecoderLayer,)
+    for name, module in tqdm(model.named_modules(), desc="deeper FSDP"):
+        if isinstance(module, checkpoint_modules[1:]):
+            try:
+                fully_shard(module, **fsdp_kwargs)
+            except Exception as e:
+                print(e, name)
 
     def check_fn(module):
         return isinstance(module, checkpoint_modules)
@@ -430,7 +408,7 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
     )
 
     for module in tqdm(model.modules(), desc="FSDP layer"):
-        if isinstance(module, Qwen3MoeDecoderLayer):
+        if isinstance(module, MiniMaxM2DecoderLayer):
             fully_shard(module, **fsdp_kwargs)
     fully_shard(model, **fsdp_kwargs)
 

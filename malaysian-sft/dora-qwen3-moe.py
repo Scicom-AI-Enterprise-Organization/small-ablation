@@ -358,7 +358,6 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
     )
     torch.set_num_threads(num_threads)
     device_mesh = init_device_mesh(device_type.type, (world_size,), mesh_dim_names=("dp",))
-    tp_mesh = device_mesh["dp"]
     dp_mesh = device_mesh["dp"]
     dp_rank = dp_mesh.get_local_rank()
     dp_world_size = dp_mesh.size()

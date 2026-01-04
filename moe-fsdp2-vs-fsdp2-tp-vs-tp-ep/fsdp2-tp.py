@@ -18,6 +18,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch import distributed as dist
 from torch.distributed.tensor import distribute_tensor
+from torch.distributed._tensor import Shard, Replicate
 from torch.distributed.device_mesh import init_device_mesh
 from torch.utils.data.distributed import DistributedSampler
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy, CPUOffloadPolicy
@@ -324,10 +325,11 @@ class LinearLoRA(nn.Module):
 @click.option('--batch_size', default=4, help='batch size')
 @click.option('--grad_accumulation', default=1, help='gradient accumulation')
 @click.option('--dataset', default='multipacking-qwen3', help='dataset')
-@click.option('--deeper_fsdp', is_flag=True, help='deeper FSDP')
-def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
+@click.option('--tp_size', default=4, help='TP size')
+def main(model_name, batch_size, grad_accumulation, dataset, tp_size):
     rank = int(os.environ["LOCAL_RANK"])
     world_size = int(os.environ['WORLD_SIZE'])
+    dp_size = world_size // tp_size
     device_type = torch.accelerator.current_accelerator()
     device = torch.device(f"{device_type}:{rank}")
     torch.accelerator.device_index(rank)
@@ -340,16 +342,20 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
         torch.cuda.device_count() if torch.cuda.is_available() else 1
     )
     torch.set_num_threads(num_threads)
-    device_mesh = init_device_mesh(device_type.type, (world_size,), mesh_dim_names=("dp",))
+    device_mesh = init_device_mesh(device_type.type, (dp_size, tp_size), mesh_dim_names=("dp", "tp"))
+    tp_mesh = device_mesh["tp"]
     dp_mesh = device_mesh["dp"]
     dp_rank = dp_mesh.get_local_rank()
     dp_world_size = dp_mesh.size()
 
     set_seed(42)
+    model_name = "ramdisk/Qwen3-30B-A3B-Instruct-2507-stack"
     checkpoint_dir = model_name.replace('/', '-')
     warmup_steps = 50
     learning_rate = 1e-4
     num_epoch = 3
+    batch_size = 4
+    grad_accumulation = 1
 
     os.makedirs(checkpoint_dir, exist_ok=True)
     
@@ -399,27 +405,7 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
         reduce_dtype=torch.float32,
     )
     fsdp_kwargs["mesh"] = dp_mesh
-
-    if deeper_fsdp:
-        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
-        # fsdp_kwargs["reshard_after_forward"] = True
-
-        checkpoint_modules = (
-            Qwen3MoeDecoderLayer, 
-            Qwen3MoeSparseMoeBlockParallel, 
-            Qwen3MoeAttention, 
-            Qwen3MoeMLP,
-        )
-
-        for name, module in tqdm(model.named_modules(), desc="deeper FSDP"):
-            if isinstance(module, checkpoint_modules[1:]):
-                try:
-                    fully_shard(module, **fsdp_kwargs)
-                except Exception as e:
-                    print(e, name)
-
-    else:
-        checkpoint_modules = (Qwen3MoeDecoderLayer,)
+    checkpoint_modules = (Qwen3MoeDecoderLayer, Qwen3MoeSparseMoeBlockParallel, Qwen3MoeAttention)
 
     def check_fn(module):
         return isinstance(module, checkpoint_modules)
@@ -428,6 +414,41 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
         checkpoint_wrapper,
         checkpoint_impl=CheckpointImpl.NO_REENTRANT,
     )
+
+    for layer_id, block in enumerate(model.model.layers):
+        layer_tp_plan = {
+
+            "self_attn.q_proj.linear": ColwiseParallel(),
+            "self_attn.q_proj.lora_A": RowwiseParallel(input_layouts=Replicate()),
+            "self_attn.q_proj.lora_B": ColwiseParallel(),   
+
+            "self_attn.k_proj.linear": ColwiseParallel(),
+            "self_attn.k_proj.lora_A": RowwiseParallel(input_layouts=Replicate()),
+            "self_attn.k_proj.lora_B": ColwiseParallel(),
+
+            "self_attn.v_proj.linear": ColwiseParallel(),
+            "self_attn.v_proj.lora_A": RowwiseParallel(input_layouts=Replicate()),
+            "self_attn.v_proj.lora_B": ColwiseParallel(),
+
+            "self_attn.o_proj.linear": RowwiseParallel(),
+            "self_attn.o_proj.lora_A": RowwiseParallel(),
+
+            "mlp.gate_proj.linear": ColwiseParallel(),
+            "mlp.gate_proj.lora_A.e": RowwiseParallel(input_layouts=Replicate()),
+            "mlp.gate_proj.lora_B.e": ColwiseParallel(),
+
+            "mlp.up_proj.linear": ColwiseParallel(),
+            "mlp.up_proj.lora_A.e": RowwiseParallel(input_layouts=Replicate()),
+            "mlp.up_proj.lora_B.e": ColwiseParallel(),
+
+            "mlp.down_proj.linear": RowwiseParallel(),
+            "mlp.down_proj.lora_A.e": RowwiseParallel(),
+        }
+        parallelize_module(
+            module=block,
+            device_mesh=tp_mesh,
+            parallelize_plan=layer_tp_plan
+        )
 
     for module in tqdm(model.modules(), desc="FSDP layer"):
         if isinstance(module, Qwen3MoeDecoderLayer):
@@ -439,7 +460,7 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
         checkpoint_wrapper_fn=non_reentrant_wrapper,
         check_fn=check_fn,
     )
-    # model = torch.compile(model)
+    model = torch.compile(model)
 
     dataset = Dataset(dataset)
     sampler = DistributedSampler(
@@ -537,32 +558,6 @@ def main(model_name, batch_size, grad_accumulation, dataset, deeper_fsdp):
                 wandb.log(scalar_dict)
             except Exception as e:
                 print('failed pushed to wandb', e)
-
-        if (step + 1) % steps_per_epoch == 0:
-            print(f'saving checkpoint at {step}')
-
-            dist.barrier()
-
-            sharded_sd = model.state_dict()
-            cpu_state_dict = {}
-            
-            for param_name, sharded_param in sharded_sd.items():
-                try:
-                    full_param = sharded_param.full_tensor()
-                except:
-                    if rank == 0:
-                        print(f'{param_name} is not sharded')
-                    full_param = sharded_param
-
-                if rank == 0 and 'lora' in param_name:
-                    cpu_state_dict[param_name] = full_param.cpu()
-                else:
-                    del full_param
-            
-            if rank == 0:
-                torch.save(cpu_state_dict, os.path.join(checkpoint_dir, f'{step}-model_state_dict.pt'))
-
-            dist.barrier()
 
         step += 1
         pbar.update(1)

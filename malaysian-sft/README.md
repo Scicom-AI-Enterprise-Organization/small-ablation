@@ -4,13 +4,13 @@ Low Rank SFT on https://huggingface.co/datasets/Scicom-intl/Malaysian-Instructio
 
 ## Ablation on multiple models
 
-1. Ablation on Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, zai-org/GLM-4.5-Air and Qwen/Qwen3-30B-A3B-Instruct-2507 and Qwen/Qwen3-235B-A22B-Instruct-2507
+1. Ablation on Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, zai-org/GLM-4.5-Air and Qwen/Qwen3-30B-A3B-Instruct-2507, Qwen/Qwen3-235B-A22B-Instruct-2507 and MiniMaxAI/MiniMax-M2.1
 2. Dense LoRA SFT done using DeepSpeed Zero3 HF Trainer while MoE LoRA SFT done using FSDP2 + Fused MoE
 3. Also tried DoRA for Qwen/Qwen3-30B-A3B-Instruct-2507
 4. Multipacking variable length 16384 context length, with global batch size of 32, so global total tokens is 524288.
 5. All linear layers with rank 256 with alpha multiply by 2.0, for MoE including experts <sup> + </sup>.
 6. Liger fused cross entropy.
-7. 1e-4 learning rate, 50 warmup, 3 epoch only.
+7. 1e-4 learning rate, 50 warmup steps, and 3 epoch only.
 8. Calculate accuracy for each epoch using reasoning system prompt.
 
 <sup> + </sup> with the rank of each equal to the total rank divided by the number of active experts, https://thinkingmachines.ai/blog/lora/
