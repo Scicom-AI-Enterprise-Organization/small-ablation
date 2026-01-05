@@ -1,4 +1,3 @@
-
 import torch
 
 torch._dynamo.config.capture_scalar_outputs = True
@@ -27,15 +26,17 @@ from transformers import (
     get_linear_schedule_with_warmup,
     AutoConfig,
     AutoTokenizer,
-    Glm4MoeForCausalLM,
+    Qwen3MoeForCausalLM,
 )
-from transformers.models.glm4_moe.modeling_glm4_moe import (
-    Glm4MoeMLP,
-    Glm4MoeDecoderLayer,
-    Glm4MoeTopkRouter,
+from transformers.models.qwen3_moe.modeling_qwen3_moe import (
+    Qwen3MoeAttention,
+    Qwen3MoeMLP,
+    Qwen3MoeDecoderLayer,
+    Qwen3MoeRMSNorm,
+    load_balancing_loss_func,
     ACT2FN,
 )
-from transformers.models.glm4_moe import modeling_glm4_moe
+from transformers.models.qwen3_moe import modeling_qwen3_moe
 from liger_kernel.transformers import LigerFusedLinearCrossEntropyLoss
 from streaming import LocalDataset
 from streaming.base.format.mds.encodings import Encoding, _encodings
@@ -67,14 +68,6 @@ class Dataset(Dataset):
             data[k] = data[k].astype(np.int64)
 
         data['labels'] = data['input_ids'].copy()
-        attention_mask_sum = data['attention_mask'].sum()
-        
-        if attention_mask_sum < self.sequence_length:
-            balance = self.sequence_length - attention_mask_sum
-            data['input_ids'] = np.concatenate([data['input_ids'], np.array([151329] * balance)])
-            data['position_ids'] = np.concatenate([data['position_ids'], np.array([0] * balance)])
-            data['labels'] = np.concatenate([data['labels'], np.array([-100] * balance)])
-            data['attention_mask'] = np.concatenate([data['attention_mask'], np.array([balance])])
     
         return data
     
@@ -106,7 +99,7 @@ def collator(batch):
         'max_length_k': max_seqlen_q
     }
 
-class Model(Glm4MoeForCausalLM):
+class Model(Qwen3MoeForCausalLM):
     def __init__(self, config):
         super().__init__(config)
         self.loss = LigerFusedLinearCrossEntropyLoss(reduction="sum")
@@ -122,6 +115,9 @@ class Model(Glm4MoeForCausalLM):
         output_router_logits=None,
         **kwargs,
     ):
+        output_router_logits = (
+            output_router_logits if output_router_logits is not None else self.config.output_router_logits
+        )
         super_out = self.model.forward(
             input_ids = input_ids,
             position_ids = position_ids, 
@@ -141,6 +137,14 @@ class Model(Glm4MoeForCausalLM):
             num_items_in_batch = num_items_in_batch.to(loss.device)
 
             loss = loss / num_items_in_batch
+            if output_router_logits:
+                aux_loss = load_balancing_loss_func(
+                    super_out.router_logits,
+                    self.num_experts,
+                    self.num_experts_per_tok,
+                    attention_mask,
+                )
+                loss += self.router_aux_loss_coef * aux_loss.to(loss.device)
             return {'loss': loss}
         return super_out
 
@@ -153,27 +157,20 @@ class ExpertLoRAWeights(nn.Module):
         
         with torch.no_grad():
             init.kaiming_uniform_(self.A, a=math.sqrt(5))
-            
-class Glm4MoeMoEExpertParallel(nn.Module):
+
+class Qwen3MoeSparseMoeBlockParallel(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.num_experts = config.n_routed_experts
+        self.num_experts = config.num_experts
         self.top_k = config.num_experts_per_tok
         self.norm_topk_prob = config.norm_topk_prob
 
+        self.gate = nn.Linear(config.hidden_size, config.num_experts, bias=False)
         self.gate_proj = nn.Parameter(torch.zeros(self.num_experts, config.hidden_size, config.moe_intermediate_size))
         self.up_proj = nn.Parameter(torch.zeros(self.num_experts, config.hidden_size, config.moe_intermediate_size))
         self.down_proj = nn.Parameter(torch.zeros(self.num_experts, config.moe_intermediate_size, config.hidden_size))
         self._is_stacked = False
         self.act_fn = ACT2FN[config.hidden_act]
-
-        self.gate = Glm4MoeTopkRouter(config)
-        self.shared_experts = Glm4MoeMLP(
-            config=config, intermediate_size=config.moe_intermediate_size * config.n_shared_experts
-        )
-        self.gate_lora = None
-        self.up_lora = None
-        self.down_lora = None
     
     def apply_lora_stack(self, r, alpha):
         if self._is_stacked:
@@ -196,13 +193,12 @@ class Glm4MoeMoEExpertParallel(nn.Module):
         )
 
     def moe(self, hidden_states: torch.Tensor, topk_indices: torch.Tensor, topk_weights: torch.Tensor):
-        inputs = hidden_states
         M = hidden_states.shape[0]
         hidden_dim = hidden_states.shape[-1]
 
         sort_indices = topk_indices.view(-1).argsort()  # (M * topk,)
         sorted_pos = sort_indices // self.top_k
-        grouped_inputs = inputs[sorted_pos]  # (M * topk, dim)
+        grouped_inputs = hidden_states[sorted_pos]  # (M * topk, hidden_dim)
 
         experts_count = topk_indices.view(-1).bincount(minlength=self.num_experts)
         cu_experts_count = experts_count.cumsum(dim=0).to(torch.int32)
@@ -250,7 +246,6 @@ class Glm4MoeMoEExpertParallel(nn.Module):
             self.down_proj,
             cu_experts_count,
         )
-
         if self.down_lora is not None:
             down_out_lora_A = torch._grouped_mm(
                 intermediate,
@@ -266,22 +261,32 @@ class Glm4MoeMoEExpertParallel(nn.Module):
 
         down_out = down_out * topk_weights.view(-1)[sort_indices].unsqueeze(-1)
 
-        outputs = inputs.new_zeros(M, hidden_dim)
+        outputs = hidden_states.new_zeros(M, hidden_dim)
         sorted_pos_expanded = sorted_pos.unsqueeze(-1).expand(-1, hidden_dim)
         outputs.scatter_add_(0, sorted_pos_expanded, down_out.to(outputs.dtype))
 
         return outputs
     
-    def forward(self, hidden_states):
-        residuals = hidden_states
-        orig_shape = hidden_states.shape
-        topk_indices, topk_weights = self.gate(hidden_states)
-        hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-        hidden_states = self.moe(hidden_states, topk_indices, topk_weights).view(*orig_shape)
-        hidden_states = hidden_states + self.shared_experts(residuals)
-        return hidden_states
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        batch_size, sequence_length, hidden_dim = hidden_states.shape
+        hidden_states_flat = hidden_states.view(-1, hidden_dim)
+        
+        router_logits = self.gate(hidden_states_flat)
 
-modeling_glm4_moe.Glm4MoeMoE = Glm4MoeMoEExpertParallel
+        routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+        routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
+        
+        if self.norm_topk_prob:
+            routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+        
+        routing_weights = routing_weights.to(hidden_states.dtype)
+
+        final_hidden_states = self.moe(hidden_states_flat, selected_experts, routing_weights)
+        
+        final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
+        return final_hidden_states, router_logits
+
+modeling_qwen3_moe.Qwen3MoeSparseMoeBlock = Qwen3MoeSparseMoeBlockParallel
 
 class LinearLoRA(nn.Module):
     def __init__(self, linear: nn.Linear, r=4, alpha=1.0):
@@ -303,9 +308,9 @@ class LinearLoRA(nn.Module):
         out = self.linear(x)
         lora_out = F.linear(F.linear(x.to(self.lora_A.dtype), self.lora_A), self.lora_B) * self.scaling
         return out + lora_out.to(out.dtype)
-        
+
 def check_fn(module):
-    return isinstance(module, (Glm4MoeDecoderLayer, Glm4MoeMoEExpertParallel))
+    return isinstance(module, Qwen3MoeDecoderLayer)
 
 non_reentrant_wrapper = partial(
     checkpoint_wrapper,
@@ -333,12 +338,14 @@ def main():
     dp_world_size = dp_mesh.size()
 
     set_seed(42)
-    model_name = "nfs/nfs/GLM-4.5-Air"
+    model_name = "gfs/01be5b33/Qwen3-30B-A3B-Instruct-2507-stack"
     warmup_steps = 50
     learning_rate = 1e-4
-    dataset = 'multipacking-glm'
-    batch_size = 1
-    grad_accumulation = 2
+    batch_size = 4
+    grad_accumulation = 1
+    dataset = "multipacking-qwen3"
+
+    os.makedirs(checkpoint_dir, exist_ok=True)
     
     model = Model.from_pretrained(
         model_name, 
@@ -362,7 +369,7 @@ def main():
     rank_lora = 256
     alpha_lora = 512
 
-    for name, module in tqdm(model.named_modules()):
+    for name, module in tqdm(model.named_modules(), desc="LoRA linear"):
         for child_name, child in module.named_children():
             if len(child_name) and any([a in child_name for a in selected]) and isinstance(child, nn.Linear):
                 
@@ -371,13 +378,13 @@ def main():
     
                 lora = LinearLoRA(child, r=rank_lora, alpha=alpha_lora)
                 setattr(module, child_name, lora)
-    
+
     top_k = model.config.num_experts_per_tok
     r = rank_lora // top_k
     alpha = alpha_lora // top_k
     
-    for module in tqdm(model.modules()):
-        if isinstance(module, Glm4MoeMoEExpertParallel):
+    for module in tqdm(model.modules(), desc="apply lora stack"):
+        if isinstance(module, Qwen3MoeSparseMoeBlockParallel):
             module.apply_lora_stack(r=r, alpha=alpha)
 
     fsdp_kwargs = {}
@@ -387,8 +394,8 @@ def main():
     )
     fsdp_kwargs["mesh"] = dp_mesh
 
-    for module in tqdm(model.modules()):
-        if isinstance(module, Glm4MoeDecoderLayer):
+    for module in tqdm(model.modules(), desc="FSDP layer"):
+        if isinstance(module, Qwen3MoeDecoderLayer):
             fully_shard(module, **fsdp_kwargs)
     fully_shard(model, **fsdp_kwargs)
 
@@ -417,13 +424,17 @@ def main():
     )
     optim = torch.optim.AdamW(model.parameters(), lr=1e-4, fused=True, weight_decay=0.01)
     steps_per_epoch = len(train_loader) // grad_accumulation
-    total_steps = steps_per_epoch * 1
-
+    total_steps = steps_per_epoch
     scheduler = get_linear_schedule_with_warmup(
         optim, 
         warmup_steps, 
         num_training_steps=total_steps
     )
+
+    if rank == 0:
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                print(name, param.size(), param.dtype)
 
     step = 0
     pbar = tqdm(total=total_steps, initial=step)
@@ -432,72 +443,70 @@ def main():
         wandb.init()
     
     total_global_total_tokens = 0
-    try:
-        while step < total_steps:
-            batches = []
-            total_tokens = 0
-            for _ in range(grad_accumulation):
-                try:
-                    batch = next(iter_train_loader)
-                except StopIteration:
-                    iter_train_loader = iter(train_loader)
-                    batch = next(iter_train_loader)
-                valid_tokens = (batch['labels'] != -100).sum().item()
-                total_tokens += valid_tokens
-                batches.append(batch)
+    while step < total_steps:
+        batches = []
+        total_tokens = 0
+        for _ in range(grad_accumulation):
+            try:
+                batch = next(iter_train_loader)
+            except StopIteration:
+                iter_train_loader = iter(train_loader)
+                batch = next(iter_train_loader)
+            valid_tokens = (batch['labels'] != -100).sum().item()
+            total_tokens += valid_tokens
+            batches.append(batch)
 
-            token_tensor = torch.tensor([total_tokens], dtype=torch.long, device=device)
-            dp_group = dp_mesh.get_group()
-            dist.all_reduce(token_tensor, op=dist.ReduceOp.SUM, group=dp_group)
-            global_total_tokens = token_tensor.item()
-            total_global_total_tokens += global_total_tokens
-            
-            torch.cuda.synchronize()
-            t0 = time.time()
-
-            loss_sum = 0.0
-            for b in batches:
-                for k in b.keys():
-                    if isinstance(b[k], torch.Tensor):
-                        b[k] = b[k].to(device, non_blocking=True)
-                
-                b['num_items_in_batch'] = torch.tensor(global_total_tokens)
-                out = model(**b, use_cache=False)
-                loss = out["loss"] * dp_world_size
-                loss.backward()
-                loss_sum += loss
-
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optim.step()
-            scheduler.step()
-            optim.zero_grad()
-
-            torch.cuda.synchronize()
-            t1 = time.time()
-            dt = t1 - t0
-
-            throughput_per_sec = global_total_tokens / dt
-
-            if rank == 0:
-                scalar_dict = {
-                    "train/grad_norm": grad_norm,
-                    "train/learning_rate": scheduler.get_last_lr()[0],
-                    "train/loss": loss_sum,
-                    "train/global_step": step,
-                    "train/train_tokens_per_second": throughput_per_sec,
-                    "train/num_input_tokens_seen": total_global_total_tokens,
-                }
-                print(scalar_dict)
-                try:
-                    wandb.log(scalar_dict)
-                except Exception as e:
-                    print('failed pushed to wandb', e)
-
-            step += 1
-            pbar.update(1)
+        token_tensor = torch.tensor([total_tokens], dtype=torch.long, device=device)
+        dp_group = dp_mesh.get_group()
+        dist.all_reduce(token_tensor, op=dist.ReduceOp.SUM, group=dp_group)
+        global_total_tokens = token_tensor.item()
+        total_global_total_tokens += global_total_tokens
         
-    except Exception as e:
-        print('major break', e)
+        torch.cuda.synchronize()
+        t0 = time.time()
+
+        loss_sum = 0.0
+        for b in batches:
+            for k in b.keys():
+                if isinstance(b[k], torch.Tensor):
+                    b[k] = b[k].to(device, non_blocking=True)
+            
+            b['num_items_in_batch'] = torch.tensor(global_total_tokens)
+            out = model(**b, use_cache=False)
+            loss = out["loss"] * dp_world_size
+            loss.backward()
+            loss_sum += loss
+
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optim.step()
+        scheduler.step()
+        optim.zero_grad()
+
+        torch.cuda.synchronize()
+        t1 = time.time()
+        dt = t1 - t0
+
+        throughput_per_sec = global_total_tokens / dt
+
+        if rank == 0:
+            scalar_dict = {
+                "train/grad_norm": grad_norm,
+                "train/learning_rate": scheduler.get_last_lr()[0],
+                "train/loss": loss_sum,
+                "train/global_step": step,
+                "train/train_tokens_per_second": throughput_per_sec,
+                "train/num_input_tokens_seen": total_global_total_tokens,
+            }
+            print(scalar_dict)
+            try:
+                wandb.log(scalar_dict)
+            except Exception as e:
+                print('failed pushed to wandb', e)
+
+        step += 1
+        pbar.update(1)
+    
+    dist.barrier()
 
     sharded_sd = model.state_dict()
     cpu_state_dict = {}
@@ -516,9 +525,11 @@ def main():
             del full_param
     
     if rank == 0:
-        checkpoint_dir = 'gfs/01be5b33/GLM-4.5-Air-bf16'
+        checkpoint_dir = 'gfs/01be5b33/Qwen3-30B-A3B-Instruct-2507-bf16'
         os.makedirs(checkpoint_dir, exist_ok=True)
         torch.save(cpu_state_dict, os.path.join(checkpoint_dir, f'model_state_dict.pt'))
+
+    dist.barrier()
 
 if __name__ == "__main__":
     main()

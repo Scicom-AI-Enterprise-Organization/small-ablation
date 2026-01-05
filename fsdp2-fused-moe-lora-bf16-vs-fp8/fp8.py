@@ -26,15 +26,17 @@ from transformers import (
     get_linear_schedule_with_warmup,
     AutoConfig,
     AutoTokenizer,
-    Glm4MoeForCausalLM,
+    Qwen3MoeForCausalLM,
 )
-from transformers.models.glm4_moe.modeling_glm4_moe import (
-    Glm4MoeMLP,
-    Glm4MoeDecoderLayer,
-    Glm4MoeTopkRouter,
+from transformers.models.qwen3_moe.modeling_qwen3_moe import (
+    Qwen3MoeAttention,
+    Qwen3MoeMLP,
+    Qwen3MoeDecoderLayer,
+    Qwen3MoeRMSNorm,
+    load_balancing_loss_func,
     ACT2FN,
 )
-from transformers.models.glm4_moe import modeling_glm4_moe
+from transformers.models.qwen3_moe import modeling_qwen3_moe
 from liger_kernel.transformers import LigerFusedLinearCrossEntropyLoss
 from streaming import LocalDataset
 from streaming.base.format.mds.encodings import Encoding, _encodings
@@ -111,7 +113,7 @@ def collator(batch):
         'max_length_k': max_seqlen_q
     }
 
-class Model(Glm4MoeForCausalLM):
+class Model(Qwen3MoeForCausalLM):
     def __init__(self, config):
         super().__init__(config)
         self.loss = LigerFusedLinearCrossEntropyLoss(reduction="sum")
@@ -163,35 +165,40 @@ def _to_column_major(x: torch.Tensor) -> torch.Tensor:
     return x.transpose(-1, -2).contiguous()
 
 # same as https://github.com/pytorch/torchtitan/blob/main/torchtitan/models/moe/utils.py#L19
+# improved using Claude Sonnet 4.5
 def pad_for_alignment(grouped_inputs, experts_count, alignment=16):
-    """Pad inputs so each expert group is aligned. Returns padding context for reuse."""
-    experts_count_padded = ((experts_count + alignment - 1) // alignment) * alignment
+    num_experts = experts_count.shape[0]
+    device = grouped_inputs.device
+    dtype = grouped_inputs.dtype
+    hidden_dim = grouped_inputs.shape[1]
     
-    # cu_experts_count = experts_count.cumsum(dim=0).to(torch.int32)
-    cu_original = torch.cat([torch.zeros(1, dtype=torch.int32, device=experts_count.device), 
-                             experts_count.cumsum(0).to(torch.int32)])
-    cu_padded = torch.cat([torch.zeros(1, dtype=torch.int32, device=experts_count.device), 
-                           experts_count_padded.cumsum(0).to(torch.int32)])
+    experts_count_padded = ((experts_count + (alignment - 1)) & ~(alignment - 1))  # Bitwise for power-of-2
+    
+    cu_original = torch.cat([
+        torch.zeros(1, dtype=torch.int32, device=device),
+        experts_count.to(torch.int32).cumsum(0)
+    ])
+    cu_padded = torch.cat([
+        torch.zeros(1, dtype=torch.int32, device=device),
+        experts_count_padded.to(torch.int32).cumsum(0)
+    ])
+    
+    total_padded = cu_padded[-1].item()
     
     total_tokens = grouped_inputs.shape[0]
-    token_indices = torch.arange(total_tokens, device=grouped_inputs.device)
-    expert_ids = torch.searchsorted(cu_original[1:], token_indices, right=True)
-    position_in_group = token_indices - cu_original[expert_ids]
-    dest_indices = cu_padded[expert_ids] + position_in_group
+    token_indices = torch.arange(total_tokens, device=device, dtype=torch.int32)
+    expert_ids = torch.bucketize(token_indices, cu_original[1:], right=True)
     
-    total_padded = cu_padded[-1]
-    padded_inputs = torch.zeros(total_padded, grouped_inputs.shape[1], 
-                                dtype=grouped_inputs.dtype, device=grouped_inputs.device)
-    padded_inputs[dest_indices] = grouped_inputs
+    dest_indices = cu_padded[expert_ids] + (token_indices - cu_original[expert_ids])
     
-    ctx = {
-        'cu_original': cu_original[1:],
+    padded_inputs = grouped_inputs.new_zeros(total_padded, hidden_dim)
+    padded_inputs.index_copy_(0, dest_indices.long(), grouped_inputs)
+    
+    return padded_inputs, {
         'cu_padded': cu_padded[1:],
-        'dest_indices': dest_indices,
+        'dest_indices': dest_indices.long(),
         'total_padded': total_padded,
-        'total_tokens': total_tokens,
     }
-    return padded_inputs, ctx
 
 def pad_tensor(tensor, ctx):
     padded = torch.zeros(ctx['total_padded'], tensor.shape[1], 
@@ -202,23 +209,21 @@ def pad_tensor(tensor, ctx):
 def unpad_tensor(padded_tensor, ctx):
     return padded_tensor[ctx['dest_indices']]
 
-class Glm4MoeMoEExpertParallel(nn.Module):
+class Qwen3MoeSparseMoeBlockParallel(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.num_experts = config.n_routed_experts
+        self.num_experts = config.num_experts
         self.top_k = config.num_experts_per_tok
         self.norm_topk_prob = config.norm_topk_prob
 
+        self.gate = nn.Linear(config.hidden_size, config.num_experts, bias=False)
+        # Weights in (out, in) format like GLM4
         self.gate_proj = nn.Parameter(torch.zeros(self.num_experts, config.moe_intermediate_size, config.hidden_size))
         self.up_proj = nn.Parameter(torch.zeros(self.num_experts, config.moe_intermediate_size, config.hidden_size))
         self.down_proj = nn.Parameter(torch.zeros(self.num_experts, config.hidden_size, config.moe_intermediate_size))
         self._is_stacked = False
         self.act_fn = ACT2FN[config.hidden_act]
-
-        self.gate = Glm4MoeTopkRouter(config)
-        self.shared_experts = Glm4MoeMLP(
-            config=config, intermediate_size=config.moe_intermediate_size * config.n_shared_experts
-        )
+        
         self.gate_lora = None
         self.up_lora = None
         self.down_lora = None
@@ -228,11 +233,12 @@ class Glm4MoeMoEExpertParallel(nn.Module):
             return
 
         self.r = r
-        self.alpha = alpha
         self.alpha = alpha / r
         
         self._is_stacked = True
 
+        # LoRA: A is (E, in_dim, r), B is (E, r, out_dim)
+        # gate_proj is (E, moe_intermediate_size, hidden_size) -> in=hidden_size, out=moe_intermediate_size
         self.gate_lora = ExpertLoRAWeights(
             self.num_experts, self.gate_proj.shape[2], self.gate_proj.shape[1], r
         )
@@ -242,15 +248,14 @@ class Glm4MoeMoEExpertParallel(nn.Module):
         self.down_lora = ExpertLoRAWeights(
             self.num_experts, self.down_proj.shape[2], self.down_proj.shape[1], r
         )
-        
+
     def moe(self, hidden_states: torch.Tensor, topk_indices: torch.Tensor, topk_weights: torch.Tensor):
-        inputs = hidden_states
         M = hidden_states.shape[0]
         hidden_dim = hidden_states.shape[-1]
 
-        sort_indices = topk_indices.view(-1).argsort()  # (M * topk,)
+        sort_indices = topk_indices.view(-1).argsort()
         sorted_pos = sort_indices // self.top_k
-        grouped_inputs = inputs[sorted_pos]  # (M * topk, dim)
+        grouped_inputs = hidden_states[sorted_pos]
 
         experts_count = topk_indices.view(-1).bincount(minlength=self.num_experts)
         cu_experts_count = experts_count.cumsum(dim=0).to(torch.int32)
@@ -258,6 +263,7 @@ class Glm4MoeMoEExpertParallel(nn.Module):
         padded_inputs, pad_ctx = pad_for_alignment(grouped_inputs, experts_count, alignment=16)
         cu_experts_padded = pad_ctx['cu_padded']
 
+        # FP8 matmul with transpose for column-major
         gate_out = _to_fp8_rowwise_then_scaled_grouped_mm(
             padded_inputs,
             self.gate_proj.transpose(-1, -2),
@@ -293,7 +299,7 @@ class Glm4MoeMoEExpertParallel(nn.Module):
                 cu_experts_count,
             )
             up_out = up_out + pad_tensor(up_out_lora_B, pad_ctx) * self.alpha
-        
+
         intermediate_padded = self.act_fn(gate_out) * up_out
         
         down_out_padded = _to_fp8_rowwise_then_scaled_grouped_mm(
@@ -301,7 +307,6 @@ class Glm4MoeMoEExpertParallel(nn.Module):
             self.down_proj.transpose(-1, -2),
             cu_experts_padded,
         )
-
         if self.down_lora is not None:
             intermediate_unpadded = unpad_tensor(intermediate_padded, pad_ctx)
             down_out_lora_A = torch._grouped_mm(
@@ -319,21 +324,32 @@ class Glm4MoeMoEExpertParallel(nn.Module):
         down_out = unpad_tensor(down_out_padded, pad_ctx)
         down_out = down_out * topk_weights.view(-1)[sort_indices].unsqueeze(-1)
 
-        outputs = inputs.new_zeros(M, hidden_dim)
+        outputs = hidden_states.new_zeros(M, hidden_dim)
         sorted_pos_expanded = sorted_pos.unsqueeze(-1).expand(-1, hidden_dim)
         outputs.scatter_add_(0, sorted_pos_expanded, down_out.to(outputs.dtype))
+
         return outputs
     
-    def forward(self, hidden_states):
-        residuals = hidden_states
-        orig_shape = hidden_states.shape
-        topk_indices, topk_weights = self.gate(hidden_states)
-        hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-        hidden_states = self.moe(hidden_states, topk_indices, topk_weights).view(*orig_shape)
-        hidden_states = hidden_states + self.shared_experts(residuals)
-        return hidden_states
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        batch_size, sequence_length, hidden_dim = hidden_states.shape
+        hidden_states_flat = hidden_states.view(-1, hidden_dim)
+        
+        router_logits = self.gate(hidden_states_flat)
 
-modeling_glm4_moe.Glm4MoeMoE = Glm4MoeMoEExpertParallel
+        routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+        routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
+        
+        if self.norm_topk_prob:
+            routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+        
+        routing_weights = routing_weights.to(hidden_states.dtype)
+
+        final_hidden_states = self.moe(hidden_states_flat, selected_experts, routing_weights)
+        
+        final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
+        return final_hidden_states, router_logits
+
+modeling_qwen3_moe.Qwen3MoeSparseMoeBlock = Qwen3MoeSparseMoeBlockParallel
 
 class LinearLoRA(nn.Module):
     def __init__(self, linear: nn.Linear, r=4, alpha=1.0):
@@ -357,7 +373,7 @@ class LinearLoRA(nn.Module):
         return out + lora_out.to(out.dtype)
         
 def check_fn(module):
-    return isinstance(module, (Glm4MoeDecoderLayer, Glm4MoeMoEExpertParallel))
+    return isinstance(module, Qwen3MoeDecoderLayer)
 
 non_reentrant_wrapper = partial(
     checkpoint_wrapper,
@@ -385,14 +401,14 @@ def main():
     dp_world_size = dp_mesh.size()
 
     set_seed(42)
-    model_name = "gfs/01be5b33/GLM-4.5-Air-non-transpose"
+    model_name = "gfs/01be5b33/Qwen3-30B-A3B-Instruct-2507-non-transpose"
     warmup_steps = 50
     learning_rate = 1e-4
-    dataset = 'multipacking-glm'
-    batch_size = 1
-    grad_accumulation = 2
+    dataset = 'multipacking-qwen3'
+    batch_size = 4
+    grad_accumulation = 1
     
-    model = Model.from_pretrained(
+    model = Qwen3MoeForCausalLM.from_pretrained(
         model_name, 
         attn_implementation="kernels-community/vllm-flash-attn3",
         torch_dtype=torch.bfloat16,
@@ -429,7 +445,7 @@ def main():
     alpha = alpha_lora // top_k
     
     for module in tqdm(model.modules()):
-        if isinstance(module, Glm4MoeMoEExpertParallel):
+        if isinstance(module, Qwen3MoeSparseMoeBlockParallel):
             module.apply_lora_stack(r=r, alpha=alpha)
 
     def module_filter_fn(mod: torch.nn.Module, fqn: str):
@@ -448,6 +464,7 @@ def main():
     # torch._inductor.config.emulate_precision_casts = True
 
     config = Float8LinearConfig(
+        enable_fsdp_float8_all_gather=True,
         emulate=True,
     )
     convert_to_float8_training(model, config=config, module_filter_fn=module_filter_fn)
@@ -456,7 +473,7 @@ def main():
     fsdp_kwargs["mesh"] = dp_mesh
 
     for module in tqdm(model.modules()):
-        if isinstance(module, Glm4MoeDecoderLayer):
+        if isinstance(module, Qwen3MoeDecoderLayer):
             fully_shard(module, **fsdp_kwargs)
     fully_shard(model, **fsdp_kwargs)
 
@@ -568,6 +585,8 @@ def main():
     except Exception as e:
         print('major break', e)
 
+    dist.barrier()
+
     sharded_sd = model.state_dict()
     cpu_state_dict = {}
         
@@ -585,9 +604,11 @@ def main():
             del full_param
     
     if rank == 0:
-        checkpoint_dir = 'gfs/01be5b33/GLM-4.5-Air-fp8'
+        checkpoint_dir = 'gfs/01be5b33/Qwen3-30B-A3B-Instruct-2507-fp8'
         os.makedirs(checkpoint_dir, exist_ok=True)
         torch.save(cpu_state_dict, os.path.join(checkpoint_dir, f'model_state_dict.pt'))
+
+    dist.barrier()
 
 if __name__ == "__main__":
     main()

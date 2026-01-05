@@ -70,14 +70,6 @@ class Dataset(Dataset):
             data[k] = data[k].astype(np.int64)
 
         data['labels'] = data['input_ids'].copy()
-        attention_mask_sum = data['attention_mask'].sum()
-        
-        if attention_mask_sum < self.sequence_length:
-            balance = self.sequence_length - attention_mask_sum
-            data['input_ids'] = np.concatenate([data['input_ids'], np.array([151329] * balance)])
-            data['position_ids'] = np.concatenate([data['position_ids'], np.array([0] * balance)])
-            data['labels'] = np.concatenate([data['labels'], np.array([-100] * balance)])
-            data['attention_mask'] = np.concatenate([data['attention_mask'], np.array([balance])])
     
         return data
     

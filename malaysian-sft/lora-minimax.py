@@ -326,7 +326,7 @@ def main():
     dp_world_size = dp_mesh.size()
 
     set_seed(42)
-    model_name = ""
+    model_name = "gfs/01be5b33/MiniMax-M2-Instruct-stack"
     checkpoint_dir = model_name.replace('/', '-')
     warmup_steps = 50
     learning_rate = 1e-4

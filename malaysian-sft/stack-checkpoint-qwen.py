@@ -4,7 +4,7 @@ from tqdm import tqdm
 from torch import nn
 import torch
 
-model = Qwen3MoeForCausalLM.from_pretrained('ramdisk/Qwen3-30B-A3B-Instruct-2507', torch_dtype="auto")
+model = Qwen3MoeForCausalLM.from_pretrained('gfs/01be5b33/Qwen3-30B-A3B', torch_dtype="auto")
 
 for module in tqdm(model.modules()):
     if isinstance(module, Qwen3MoeSparseMoeBlock):
@@ -18,4 +18,4 @@ for module in tqdm(model.modules()):
 
         del module.experts
 
-model.save_pretrained('ramdisk/Qwen3-30B-A3B-Instruct-2507-stack')
+model.save_pretrained('gfs/01be5b33/Qwen3-30B-A3B-stack')

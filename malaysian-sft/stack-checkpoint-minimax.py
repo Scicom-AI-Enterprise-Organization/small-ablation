@@ -3,7 +3,7 @@ from tqdm import tqdm
 from torch import nn
 import torch
 
-model = AutoModelForCausalLM.from_pretrained('ramdisk/MiniMax-M2-Instruct', torch_dtype="auto")
+model = MiniMaxM2ForCausalLM.from_pretrained('gfs/01be5b33/MiniMax-M2.1', torch_dtype="auto")
 
 for module in tqdm(model.modules()):
     if isinstance(module, MiniMaxM2SparseMoeBlock):
@@ -18,4 +18,4 @@ for module in tqdm(model.modules()):
 
         del module.experts
 
-model.save_pretrained('ramdisk/MiniMax-M2-Instruct-stack')
+model.save_pretrained('gfs/01be5b33/MiniMax-M2-Instruct-stack')
