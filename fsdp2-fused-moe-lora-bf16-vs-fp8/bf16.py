@@ -516,7 +516,7 @@ def main():
             del full_param
     
     if rank == 0:
-        checkpoint_dir = 'nfs/nfs/GLM-4.5-Air-bf16'
+        checkpoint_dir = 'gfs/01be5b33/GLM-4.5-Air-bf16'
         os.makedirs(checkpoint_dir, exist_ok=True)
         torch.save(cpu_state_dict, os.path.join(checkpoint_dir, f'model_state_dict.pt'))
 

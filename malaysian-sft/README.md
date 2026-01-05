@@ -4,9 +4,9 @@ Low Rank SFT on https://huggingface.co/datasets/Scicom-intl/Malaysian-Instructio
 
 ## Ablation on multiple models
 
-1. Ablation on Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, zai-org/GLM-4.5-Air and Qwen/Qwen3-30B-A3B-Instruct-2507, Qwen/Qwen3-235B-A22B-Instruct-2507 and MiniMaxAI/MiniMax-M2.1
-2. Dense LoRA SFT done using DeepSpeed Zero3 HF Trainer while MoE LoRA SFT done using FSDP2 + Fused MoE
-3. Also tried DoRA for Qwen/Qwen3-30B-A3B-Instruct-2507
+1. Ablation on Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, zai-org/GLM-4.5-Air and Qwen/Qwen3-30B-A3B-Instruct-2507 and Qwen/Qwen3-235B-A22B-Instruct-2507.
+2. Dense LoRA SFT done using DeepSpeed Zero3 HF Trainer while MoE LoRA SFT done using FSDP2 + Fused MoE.
+3. Also tried DoRA for Qwen/Qwen3-30B-A3B-Instruct-2507.
 4. Multipacking variable length 16384 context length, with global batch size of 32, so global total tokens is 524288.
 5. All linear layers with rank 256 with alpha multiply by 2.0, for MoE including experts <sup> + </sup>.
 6. Liger fused cross entropy.
@@ -271,4 +271,44 @@ Social science 0.7016478751084129 0.8396935530500145
 Others 0.7392660110338211 0.8731110578076278
 Humanities 0.756769055745165 0.8864618885096701
 average 0.7533717892265589 0.8769859497356121
+```
+
+### Qwen/Qwen3-30B-A3B-Instruct-2507 DoRA
+
+1. Finetune,
+
+```bash
+bash fsdp2-fused-moe-Qwen3-30B-A3B-dora-256.sh
+```
+
+2. Run generation,
+
+```bash
+python3 malaymmlu.py --pattern "Qwen3-30B-A3B-Instruct-2507-dora-256-*" --num_gpus 8 --gpu_partition 8
+```
+
+3. Calculate accuracy,
+
+```bash
+python3 calculate_malaymmlu.py --pattern "malaymmlu-Qwen3-30B-A3B-Instruct-2507-dora-256-*"
+```
+
+### Qwen/Qwen3-235B-A22B-Instruct-2507
+
+1. Finetune,
+
+```bash
+bash fsdp2-fused-moe-Qwen3-235B-A22B-lora-256.sh
+```
+
+2. Run generation,
+
+```bash
+python3 malaymmlu.py --pattern "Qwen3-235B-A22B-Instruct-2507-lora-256-*" --num_gpus 8 --gpu_partition 8
+```
+
+3. Calculate accuracy,
+
+```bash
+python3 calculate_malaymmlu.py --pattern "malaymmlu-Qwen3-235B-A22B-Instruct-2507-lora-256-*"
 ```

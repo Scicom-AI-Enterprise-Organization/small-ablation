@@ -46,6 +46,7 @@ class Config:
     )
     language: str = "malay"
     benchmark_file: str = "MalayMMLU_0shot.json"
+    expert_parallelism: bool = False
 
 
 class VLLMServer:
@@ -71,6 +72,8 @@ class VLLMServer:
             "--max-model-len", "8000",
             "--tensor-parallel-size", str(self.gpu_id.count(',') + 1),
         ]
+        if self.config.expert_parallelism:
+            cmd.append("--enable-expert-parallel")
 
         print(f"Starting vLLM: {' '.join(cmd)}")
         print(f"CUDA_VISIBLE_DEVICES={self.gpu_id}")
@@ -356,8 +359,8 @@ def evaluate_model(model: str, port: int, output_dir: str, gpu_id: int, config: 
 
 
 def process_batch(args: tuple[list[tuple], int]):
-    rows, gpu_id = args
-    config = Config()
+    rows, gpu_id, expert_parallelism = args
+    config = Config(expert_parallelism=expert_parallelism)
 
     for model, port, output_dir, done_folder in rows:
         try:
@@ -372,7 +375,7 @@ def process_batch(args: tuple[list[tuple], int]):
     return []
 
 
-def run_multiprocess(items: list, func, num_workers: int = 6, partition=1):
+def run_multiprocess(items: list, func, num_workers: int = 6, partition=1, expert_parallelism=False):
     """Run function across multiple processes."""
     if not items:
         return
@@ -391,10 +394,10 @@ def run_multiprocess(items: list, func, num_workers: int = 6, partition=1):
     for item in items:
         work[next(gpus_cycle)].append(item)
 
-    work = [(v, k) for k, v in work.items()]
+    work = [(v, k, expert_parallelism) for k, v in work.items()]
 
     print(f"Distributing {len(items)} items across {len(work)} GPUs")
-    for chunk, gpu_id in work:
+    for chunk, gpu_id, _ in work:
         models = [m[0] for m in chunk]
         print(f"  GPU {gpu_id}: {len(chunk)} items - {models}")
 
@@ -407,7 +410,8 @@ def run_multiprocess(items: list, func, num_workers: int = 6, partition=1):
 @click.option("--num_gpus", default=8, help="number of gpus")
 @click.option("--gpu_partition", default=1, help="number of gpus per process")
 @click.option("--done_folder", default="done-malaymmlu", help="done folder malaymmlu")
-def main(pattern, num_gpus, gpu_partition, done_folder):
+@click.option("--expert_parallelism", is_flag=True)
+def main(pattern, num_gpus, gpu_partition, done_folder, expert_parallelism):
 
     os.makedirs(done_folder, exist_ok=True)
 
@@ -433,7 +437,13 @@ def main(pattern, num_gpus, gpu_partition, done_folder):
     for model, port, output_dir, done_folder in filtered_tasks:
         print(f"  - {model} -> {output_dir}")
 
-    run_multiprocess(filtered_tasks, process_batch, num_workers=num_gpus, partition=gpu_partition)
+    run_multiprocess(
+        filtered_tasks, 
+        process_batch, 
+        num_workers=num_gpus, 
+        partition=gpu_partition,
+        expert_parallelism=expert_parallelism,
+    )
 
 
 if __name__ == "__main__":

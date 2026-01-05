@@ -385,7 +385,7 @@ def main():
     dp_world_size = dp_mesh.size()
 
     set_seed(42)
-    model_name = "GLM-4.5-Air-non-transpose"
+    model_name = "gfs/01be5b33/GLM-4.5-Air-non-transpose"
     warmup_steps = 50
     learning_rate = 1e-4
     dataset = 'multipacking-glm'
@@ -448,7 +448,6 @@ def main():
     # torch._inductor.config.emulate_precision_casts = True
 
     config = Float8LinearConfig(
-        enable_fsdp_float8_all_gather=True,
         emulate=True,
     )
     convert_to_float8_training(model, config=config, module_filter_fn=module_filter_fn)
@@ -586,7 +585,7 @@ def main():
             del full_param
     
     if rank == 0:
-        checkpoint_dir = 'nfs/nfs/GLM-4.5-Air-fp8'
+        checkpoint_dir = 'gfs/01be5b33/GLM-4.5-Air-fp8'
         os.makedirs(checkpoint_dir, exist_ok=True)
         torch.save(cpu_state_dict, os.path.join(checkpoint_dir, f'model_state_dict.pt'))
 

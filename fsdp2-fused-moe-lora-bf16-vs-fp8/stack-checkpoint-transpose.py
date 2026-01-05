@@ -1,13 +1,13 @@
-from transformers import Glm4MoeForCausalLM
-from transformers.models.glm4_moe.modeling_glm4_moe import Glm4MoeMoE
+from transformers import Qwen3MoeForCausalLM
+from transformers.models.qwen3_moe.modeling_qwen3_moe import Qwen3MoeSparseMoeBlock
 from tqdm import tqdm
 from torch import nn
 import torch
 
-model = Glm4MoeForCausalLM.from_pretrained('ramdisk/GLM-4.5-Air', torch_dtype="auto")
+model = Qwen3MoeForCausalLM.from_pretrained('gfs/01be5b33/Qwen3-30B-A3B-Instruct-2507', torch_dtype="auto")
 
 for module in tqdm(model.modules()):
-    if isinstance(module, Glm4MoeMoE):
+    if isinstance(module, Qwen3MoeSparseMoeBlock):
         gate_proj_stacked = torch.stack([e.gate_proj.weight.data for e in module.experts], dim=0).transpose(1, 2)
         up_proj_stacked = torch.stack([e.up_proj.weight.data for e in module.experts], dim=0).transpose(1, 2)
         down_proj_stacked = torch.stack([e.down_proj.weight.data for e in module.experts], dim=0).transpose(1, 2)
@@ -18,4 +18,4 @@ for module in tqdm(model.modules()):
 
         del module.experts
 
-model.save_pretrained('nfs/nfs/GLM-4.5-Air')
+model.save_pretrained('gfs/01be5b33/Qwen3-30B-A3B-Instruct-2507-stack')

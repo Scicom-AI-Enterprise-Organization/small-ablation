@@ -1,16 +1,10 @@
 # FSDP2 Fused MoE LoRA BF16 vs FP8
 
-We should compare the loss using the FSDP2 Fused MoE with zai-org/GLM-4.5-Air, applying LoRA to all linear layers including the experts where the base layers in lower precision such as FP8, while keeping the global batch size the same.
+We should compare the loss using the FSDP2 Fused MoE with Qwen/Qwen3-30B-A3B-Instruct-2507, applying LoRA to all linear layers including the experts where the base layers in lower precision such as FP8, while keeping the global batch size the same.
 
 ## How to
 
-1. Prepare the dataset,
-
-```bash
-HF_HUB_ENABLE_HF_TRANSFER=0 hf download Scicom-intl/Malaysian-Instructions-multipacking-glm --repo-type=dataset --local-dir=./multipacking-glm
-```
-
-Script to prepare the dataset at [../malaysian-sft/notebook/multipack-malaysian-instructions-glm.ipynb](../malaysian-sft/notebook/multipack-malaysian-instructions-glm.ipynb)
+1. Prepare the dataset, [../malaysian-sft/notebook/multipack-malaysian-instructions-glm3.ipynb](../malaysian-sft/notebook/multipack-malaysian-instructions-glm.ipynb)
 
 2. Stack the experts,
 
