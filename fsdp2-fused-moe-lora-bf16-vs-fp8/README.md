@@ -30,6 +30,6 @@ bash fsdp2-fused-moe.sh
 
 ## WanDB
 
-https://wandb.ai/aies-scicom-scicom-ai/fsdp2-ep-vs-fsdp2-fused-moe
+https://wandb.ai/aies-scicom-scicom-ai/fsdp2-fused-moe-lora-bf16-vs-fp8
 
 <img src="wandb.png" width="50%">
