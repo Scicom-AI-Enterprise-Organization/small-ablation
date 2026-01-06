@@ -20,7 +20,7 @@ For FP8,
 python3 stack-checkpoint.py 
 ```
 
-FP8 required to be in column major for the weight but major problem if move to column major it will become non-contiguous so FSDP2 cannot shard it, so what we can do, we save as row major contiguouly during forward we will transpose to become column major.
+FP8 required to be in column major for the weight but major problem if move to column major it will become non-contiguous so FSDP2 cannot shard it, so what we can do, we save as row major contiguously during forward we will transpose to become column major.
 
 3. Run the finetuning,
 
