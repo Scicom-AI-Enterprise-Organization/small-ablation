@@ -344,8 +344,6 @@ def main():
     batch_size = 4
     grad_accumulation = 1
     dataset = "multipacking-qwen3"
-
-    os.makedirs(checkpoint_dir, exist_ok=True)
     
     model = Model.from_pretrained(
         model_name, 
@@ -404,7 +402,6 @@ def main():
         checkpoint_wrapper_fn=non_reentrant_wrapper,
         check_fn=check_fn,
     )
-    model = torch.compile(model)
 
     dataset = Dataset(dataset)
     sampler = DistributedSampler(

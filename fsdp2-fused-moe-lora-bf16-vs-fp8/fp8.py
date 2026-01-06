@@ -176,11 +176,11 @@ def pad_for_alignment(grouped_inputs, experts_count, alignment=16):
     
     cu_original = torch.cat([
         torch.zeros(1, dtype=torch.int32, device=device),
-        experts_count.to(torch.int32).cumsum(0)
+        experts_count.cumsum(0).to(torch.int32)
     ])
     cu_padded = torch.cat([
         torch.zeros(1, dtype=torch.int32, device=device),
-        experts_count_padded.to(torch.int32).cumsum(0)
+        experts_count_padded.cumsum(0).to(torch.int32)
     ])
     
     total_padded = cu_padded[-1].item()
@@ -373,7 +373,7 @@ class LinearLoRA(nn.Module):
         return out + lora_out.to(out.dtype)
         
 def check_fn(module):
-    return isinstance(module, Qwen3MoeDecoderLayer)
+    return isinstance(module, (Qwen3MoeDecoderLayer, Qwen3MoeSparseMoeBlockParallel))
 
 non_reentrant_wrapper = partial(
     checkpoint_wrapper,
@@ -468,6 +468,7 @@ def main():
         emulate=True,
     )
     convert_to_float8_training(model, config=config, module_filter_fn=module_filter_fn)
+    print(model)
 
     fsdp_kwargs = {}
     fsdp_kwargs["mesh"] = dp_mesh
@@ -517,74 +518,70 @@ def main():
         wandb.init()
     
     total_global_total_tokens = 0
-    try:
-        while step < total_steps:
-            batches = []
-            total_tokens = 0
-            for _ in range(grad_accumulation):
-                try:
-                    batch = next(iter_train_loader)
-                except StopIteration:
-                    iter_train_loader = iter(train_loader)
-                    batch = next(iter_train_loader)
-                valid_tokens = (batch['labels'] != -100).sum().item()
-                total_tokens += valid_tokens
-                batches.append(batch)
+    while step < total_steps:
+        batches = []
+        total_tokens = 0
+        for _ in range(grad_accumulation):
+            try:
+                batch = next(iter_train_loader)
+            except StopIteration:
+                iter_train_loader = iter(train_loader)
+                batch = next(iter_train_loader)
+            valid_tokens = (batch['labels'] != -100).sum().item()
+            total_tokens += valid_tokens
+            batches.append(batch)
 
-            token_tensor = torch.tensor([total_tokens], dtype=torch.long, device=device)
-            dp_group = dp_mesh.get_group()
-            dist.all_reduce(token_tensor, op=dist.ReduceOp.SUM, group=dp_group)
-            global_total_tokens = token_tensor.item()
-            total_global_total_tokens += global_total_tokens
-            
-            torch.cuda.synchronize()
-            t0 = time.time()
-
-            loss_sum = 0.0
-            for b in batches:
-                for k in b.keys():
-                    if isinstance(b[k], torch.Tensor):
-                        b[k] = b[k].to(device, non_blocking=True)
-                
-                b['num_items_in_batch'] = torch.tensor(global_total_tokens)
-                out = model(**b, use_cache=False)
-                loss = out["loss"] * dp_world_size
-                loss.backward()
-                loss_sum += loss
-
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optim.step()
-            precompute_float8_dynamic_scale_for_fsdp(model)
-            scheduler.step()
-            optim.zero_grad()
-
-            torch.cuda.synchronize()
-            t1 = time.time()
-            dt = t1 - t0
-
-            throughput_per_sec = global_total_tokens / dt
-
-            if rank == 0:
-                scalar_dict = {
-                    "train/grad_norm": grad_norm,
-                    "train/learning_rate": scheduler.get_last_lr()[0],
-                    "train/loss": loss_sum,
-                    "train/global_step": step,
-                    "train/train_tokens_per_second": throughput_per_sec,
-                    "train/num_input_tokens_seen": total_global_total_tokens,
-                }
-                print(scalar_dict)
-                try:
-                    wandb.log(scalar_dict)
-                except Exception as e:
-                    print('failed pushed to wandb', e)
-
-            step += 1
-            pbar.update(1)
+        token_tensor = torch.tensor([total_tokens], dtype=torch.long, device=device)
+        dp_group = dp_mesh.get_group()
+        dist.all_reduce(token_tensor, op=dist.ReduceOp.SUM, group=dp_group)
+        global_total_tokens = token_tensor.item()
+        total_global_total_tokens += global_total_tokens
         
-    except Exception as e:
-        print('major break', e)
+        torch.cuda.synchronize()
+        t0 = time.time()
 
+        loss_sum = 0.0
+        for b in batches:
+            for k in b.keys():
+                if isinstance(b[k], torch.Tensor):
+                    b[k] = b[k].to(device, non_blocking=True)
+            
+            b['num_items_in_batch'] = torch.tensor(global_total_tokens)
+            out = model(**b, use_cache=False)
+            loss = out["loss"] * dp_world_size
+            loss.backward()
+            loss_sum += loss
+
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optim.step()
+        precompute_float8_dynamic_scale_for_fsdp(model)
+        scheduler.step()
+        optim.zero_grad()
+
+        torch.cuda.synchronize()
+        t1 = time.time()
+        dt = t1 - t0
+
+        throughput_per_sec = global_total_tokens / dt
+
+        if rank == 0:
+            scalar_dict = {
+                "train/grad_norm": grad_norm,
+                "train/learning_rate": scheduler.get_last_lr()[0],
+                "train/loss": loss_sum,
+                "train/global_step": step,
+                "train/train_tokens_per_second": throughput_per_sec,
+                "train/num_input_tokens_seen": total_global_total_tokens,
+            }
+            print(scalar_dict)
+            try:
+                wandb.log(scalar_dict)
+            except Exception as e:
+                print('failed pushed to wandb', e)
+
+        step += 1
+        pbar.update(1)
+        
     dist.barrier()
 
     sharded_sd = model.state_dict()
