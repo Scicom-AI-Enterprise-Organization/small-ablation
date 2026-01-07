@@ -19,6 +19,8 @@ Low Rank SFT on https://huggingface.co/datasets/Scicom-intl/Malaysian-Instructio
 
 https://wandb.ai/aies-scicom-scicom-ai/malaysian-sft
 
+<img src="loss.png" width="50%">
+
 ## Finetuning
 
 We benchmark using https://huggingface.co/datasets/UMxYTLAILabs/MalayMMLU
@@ -293,6 +295,9 @@ python3 malaymmlu.py --pattern "Qwen3-30B-A3B-Instruct-2507-dora-256-*" --num_gp
 python3 calculate_malaymmlu.py --pattern "malaymmlu-Qwen3-30B-A3B-Instruct-2507-dora-256-*"
 ```
 
+```
+```
+
 ### Qwen/Qwen3-235B-A22B-Instruct-2507
 
 1. Finetune,
@@ -312,3 +317,34 @@ python3 malaymmlu.py --pattern "Qwen3-235B-A22B-Instruct-2507-lora-256-*" --num_
 ```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-Qwen3-235B-A22B-Instruct-2507-lora-256-*"
 ```
+
+```
+malaymmlu-Qwen3-235B-A22B-Instruct-2507-lora-256-959 72638
+malaymmlu-Qwen3-235B-A22B-Instruct-2507-lora-256-319 72639
+malaymmlu-Qwen3-235B-A22B-Instruct-2507-lora-256-639 72638
+
+malaymmlu-Qwen3-235B-A22B-Instruct-2507-lora-256-959
+STEM 0.8276708964388048 0.8964388047482603
+Language 0.795324427480916 0.9001272264631043
+Social science 0.744434807747904 0.8587742122000578
+Others 0.768289757735668 0.872631326457184
+Humanities 0.800910125142207 0.89806598407281
+average 0.7873260029091 0.8852075107882833
+
+malaymmlu-Qwen3-235B-A22B-Instruct-2507-lora-256-319
+STEM 0.8346295538272616 0.904625460499386
+Language 0.7876908396946565 0.8947201017811705
+Social science 0.7382191384793293 0.8633998265394622
+Others 0.762532981530343 0.880307028064284
+Humanities 0.8018202502844141 0.9007963594994312
+average 0.7849785527632008 0.8887697552767468
+
+malaymmlu-Qwen3-235B-A22B-Instruct-2507-lora-256-639
+STEM 0.8325828898894801 0.898894801473598
+Language 0.7872137404580153 0.8966284987277354
+Social science 0.7460248626770744 0.856605955478462
+Others 0.7745262652914368 0.8798272967138403
+Humanities 0.8150170648464163 0.907622298065984
+average 0.7910729646324846 0.8879157700919238
+```
+
