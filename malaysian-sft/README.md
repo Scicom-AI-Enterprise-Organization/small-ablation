@@ -4,7 +4,7 @@ Low Rank SFT on https://huggingface.co/datasets/Scicom-intl/Malaysian-Instructio
 
 ## Ablation on multiple models
 
-1. Ablation on Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, zai-org/GLM-4.5-Air and Qwen/Qwen3-30B-A3B-Instruct-2507 and Qwen/Qwen3-235B-A22B-Instruct-2507.
+1. Ablation on Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, zai-org/GLM-4.5-Air and Qwen/Qwen3-30B-A3B-Instruct-2507, Qwen/Qwen3-235B-A22B-Instruct-2507, openai/gpt-oss-20b and openai/gpt-oss-120b
 2. Dense LoRA SFT done using DeepSpeed Zero3 HF Trainer while MoE LoRA SFT done using FSDP2 + Fused MoE.
 3. Also tried DoRA for Qwen/Qwen3-30B-A3B-Instruct-2507.
 4. Multipacking variable length 16384 context length, with global batch size of 32, so global total tokens is 524288.
@@ -379,3 +379,18 @@ Humanities 0.8150170648464163 0.907622298065984
 average 0.7910729646324846 0.8879157700919238
 ```
 
+### openai/gpt-oss-20b
+
+1. Finetune,
+
+```bash
+bash fsdp2-fused-moe-gpt-oss-20b-lora-256.sh
+```
+
+### openai/gpt-oss-120b
+
+1. Finetune,
+
+```bash
+bash fsdp2-fused-moe-gpt-oss-120b-lora-256.sh
+```
