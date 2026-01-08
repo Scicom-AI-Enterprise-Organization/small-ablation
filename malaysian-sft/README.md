@@ -21,6 +21,10 @@ https://wandb.ai/aies-scicom-scicom-ai/malaysian-sft
 
 <img src="loss.png" width="50%">
 
+### Overall Benchmark
+
+<img src="accuracy.png" width="50%">
+
 ## Finetuning
 
 We benchmark using https://huggingface.co/datasets/UMxYTLAILabs/MalayMMLU
@@ -374,6 +378,4 @@ Others 0.7745262652914368 0.8798272967138403
 Humanities 0.8150170648464163 0.907622298065984
 average 0.7910729646324846 0.8879157700919238
 ```
-
-## Benchmark
 
