@@ -486,7 +486,7 @@ def main(model_name, batch_size, grad_accumulation):
             except Exception as e:
                 print('failed pushed to wandb', e)
 
-        if (step + 1) % steps_per_epoch == 0 and rank == 0:
+        if (step + 1) % steps_per_epoch == 0:
             print(f'saving checkpoint at {step}')
 
             dist.barrier()
