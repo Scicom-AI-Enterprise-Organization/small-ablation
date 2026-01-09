@@ -210,9 +210,9 @@ class GptOssExpertsParallel(nn.Module):
             cu_experts_count,
         )
         
-        if self._is_stacked and hasattr(self, 'gate_up_lora'):
-            lora_A = torch._grouped_mm(grouped_inputs, self.gate_up_lora.A, cu_experts_count)
-            lora_B = torch._grouped_mm(lora_A, self.gate_up_lora.B, cu_experts_count)
+        if self._is_stacked and hasattr(self, 'gate_lora'):
+            lora_A = torch._grouped_mm(grouped_inputs, self.gate_lora.A, cu_experts_count)
+            lora_B = torch._grouped_mm(lora_A, self.gate_lora.B, cu_experts_count)
             gate_up_out = gate_up_out + lora_B * self.alpha
 
         # Add bias - need to repeat for each token assigned to each expert
