@@ -349,13 +349,9 @@ def main(model_name, batch_size, grad_accumulation, dataset, tp_size):
     dp_world_size = dp_mesh.size()
 
     set_seed(42)
-    model_name = "ramdisk/Qwen3-30B-A3B-Instruct-2507-stack"
-    checkpoint_dir = model_name.replace('/', '-')
-    warmup_steps = 50
+    warmup_steps = 10
+    total_steps = 100
     learning_rate = 1e-4
-    num_epoch = 3
-    batch_size = 4
-    grad_accumulation = 1
 
     os.makedirs(checkpoint_dir, exist_ok=True)
     
@@ -415,34 +411,104 @@ def main(model_name, batch_size, grad_accumulation, dataset, tp_size):
         checkpoint_impl=CheckpointImpl.NO_REENTRANT,
     )
 
+    model_tp_plan = {
+        # input shape [1, L]
+        # w shape [V_shard, D]
+        # output shape [1, L, D]
+        "embed_tokens": RowwiseParallel(
+            input_layouts=Replicate(),
+            output_layouts=Replicate(),
+        ),
+        
+        # input shape [1, L, D]
+        # output shape [1, L_shard, D]
+        "norm": SequenceParallel(),
+    }
+
+    parallelize_module(
+        module=model.model,
+        device_mesh=tp_mesh,
+        parallelize_plan=model_tp_plan,
+    )
+
     for layer_id, block in enumerate(model.model.layers):
         layer_tp_plan = {
+            
+            # input shape [1, L_shard, D]
+            # output shape [1, L_shard, D]
+            "input_layernorm": SequenceParallel(),
 
+            # input shape [1, L_shard, D], will replicate to become [1, L, D]
+            "self_attn": PrepareModuleInput(
+                input_kwarg_layouts={
+                    "hidden_states": Shard(1),
+                },
+                desired_input_kwarg_layouts={
+                    "hidden_states": Replicate(),
+                },
+            ),
+
+            # input shape [1, L, D]
+            # w shape [D, D_shard]
+            # output shape [1, L, D_shard]
             "self_attn.q_proj.linear": ColwiseParallel(),
+
+            # input shape [1, L, D], will shard become [1, L, D_shard]
+            # w shape [D_shard, r]
+            # output shape [1, L, r]
             "self_attn.q_proj.lora_A": RowwiseParallel(input_layouts=Replicate()),
+            
+            # input shape [1, L, r]
+            # w shape [r, D_shard]
+            # output shape [1, L, D_shard]
             "self_attn.q_proj.lora_B": ColwiseParallel(),   
 
+            # input shape [1, L, D]
+            # w shape linear [D, D_shard]
+            # output shape [1, L, D_shard]
             "self_attn.k_proj.linear": ColwiseParallel(),
+
+            # input shape [1, L, D], will shard become [1, L, D_shard]
+            # w shape [D_shard, r]
+            # output shape [1, L, r]
             "self_attn.k_proj.lora_A": RowwiseParallel(input_layouts=Replicate()),
+
+            # input shape [1, L, r]
+            # w shape [r, D_shard]
+            # output shape [1, L, D_shard]
             "self_attn.k_proj.lora_B": ColwiseParallel(),
 
+            # input shape [1, L, D]
+            # w shape linear [D, D_shard]
+            # output shape [1, L, D_shard]
             "self_attn.v_proj.linear": ColwiseParallel(),
+
+            # input shape [1, L, D], will shard become [1, L, D_shard]
+            # w shape [D_shard, r]
+            # output shape [1, L, r]
             "self_attn.v_proj.lora_A": RowwiseParallel(input_layouts=Replicate()),
+
+            # input shape [1, L, r]
+            # w shape [r, D_shard]
+            # output shape [1, L, D_shard]
             "self_attn.v_proj.lora_B": ColwiseParallel(),
 
+            # input shape [1, L, D_shard]
+            # w shape [D_shard, D]
+            # output shape [1, L, D]
             "self_attn.o_proj.linear": RowwiseParallel(),
+
+            # input shape [1, L, D_shard]
+            # w shape [D_shard, r]
+            # output shape [1, L, r]
             "self_attn.o_proj.lora_A": RowwiseParallel(),
 
-            "mlp.gate_proj.linear": ColwiseParallel(),
-            "mlp.gate_proj.lora_A.e": RowwiseParallel(input_layouts=Replicate()),
-            "mlp.gate_proj.lora_B.e": ColwiseParallel(),
+            # input shape [1, L, r]
+            # w shape [r, D_shard]
+            # output shape [1, L, D_shard], but will replicate
+            "self_attn.o_proj.lora_B": ColwiseParallel(output_layouts=Replicate()),
 
-            "mlp.up_proj.linear": ColwiseParallel(),
-            "mlp.up_proj.lora_A.e": RowwiseParallel(input_layouts=Replicate()),
-            "mlp.up_proj.lora_B.e": ColwiseParallel(),
-
-            "mlp.down_proj.linear": RowwiseParallel(),
-            "mlp.down_proj.lora_A.e": RowwiseParallel(),
+            "post_attention_layernorm": SequenceParallel(),
         }
         parallelize_module(
             module=block,
@@ -480,7 +546,6 @@ def main(model_name, batch_size, grad_accumulation, dataset, tp_size):
     )
     optim = torch.optim.AdamW(model.parameters(), lr=1e-4, fused=True, weight_decay=0.01)
     steps_per_epoch = len(train_loader) // grad_accumulation
-    total_steps = steps_per_epoch * num_epoch
     scheduler = get_linear_schedule_with_warmup(
         optim, 
         warmup_steps, 
