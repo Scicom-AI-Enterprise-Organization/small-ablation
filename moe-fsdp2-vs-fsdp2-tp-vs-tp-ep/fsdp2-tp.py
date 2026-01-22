@@ -16,6 +16,15 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
     checkpoint_wrapper,
 )
+from torch.distributed._tensor import Shard, Replicate
+from torch.distributed.tensor.parallel import (
+    parallelize_module,
+    ColwiseParallel,
+    RowwiseParallel,
+    PrepareModuleInput,
+    PrepareModuleInputOutput,
+    SequenceParallel,
+)
 from torch import distributed as dist
 from torch.distributed.tensor import distribute_tensor
 from torch.distributed._tensor import Shard, Replicate
@@ -129,7 +138,7 @@ class Model(Qwen3MoeForCausalLM):
         output_router_logits = (
             output_router_logits if output_router_logits is not None else self.config.output_router_logits
         )
-        super_out = self.model.forward(
+        super_out = self.model(
             input_ids = input_ids,
             position_ids = position_ids, 
             attention_mask = attention_mask, 
@@ -279,9 +288,12 @@ class Qwen3MoeSparseMoeBlockParallel(nn.Module):
         return outputs
     
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        
+        print('hidden_states', hidden_states.shape)
         batch_size, sequence_length, hidden_dim = hidden_states.shape
         hidden_states_flat = hidden_states.view(-1, hidden_dim)
-        
+
+        print('hidden_states_flat', hidden_states_flat.shape, type(hidden_states_flat))
         router_logits = self.gate(hidden_states_flat)
 
         routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
@@ -308,20 +320,57 @@ class LinearLoRA(nn.Module):
         in_features = linear.in_features
         out_features = linear.out_features
         
-        self.lora_A = nn.Parameter(torch.zeros(r, in_features, dtype=torch.bfloat16))
-        self.lora_B = nn.Parameter(torch.zeros(out_features, r, dtype=torch.bfloat16))
+        self.lora_A = nn.Linear(in_features, r, bias=False, dtype=torch.bfloat16)
+        self.lora_B = nn.Linear(r, out_features, bias=False, dtype=torch.bfloat16)
         
         with torch.no_grad():
-            init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
-            # lora_B stays zero
+            init.kaiming_uniform_(self.lora_A.weight, a=math.sqrt(5))
+            init.zeros_(self.lora_B.weight)
 
     def forward(self, x):
         out = self.linear(x)
-        lora_out = F.linear(F.linear(x.to(self.lora_A.dtype), self.lora_A), self.lora_B) * self.scaling
+        lora_out = self.lora_B(self.lora_A(x.to(self.lora_A.weight.dtype))) * self.scaling
         return out + lora_out.to(out.dtype)
 
+@torch.no_grad()
+def clip_grad_norm_(parameters, max_norm, norm_type=2.0):
+    if isinstance(parameters, torch.Tensor):
+        parameters = [parameters]
+    else:
+        parameters = list(parameters)
+    
+    grads = [p.grad for p in parameters if p.grad is not None]
+    
+    norms = []
+    for grad in grads:
+        if hasattr(grad, 'full_tensor'):  # DTensor
+            grad_full = grad.full_tensor()
+        else:
+            grad_full = grad
+        
+        if norm_type == float('inf'):
+            norms.append(grad_full.abs().max())
+        else:
+            norms.append(grad_full.norm(norm_type))
+    
+    if len(norms) == 0:
+        return torch.tensor(0.0)
+    
+    total_norm = torch.stack(norms).norm(norm_type)
+    
+    clip_coef = max_norm / (total_norm + 1e-6)
+    clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
+    
+    for grad in grads:
+        if hasattr(grad, 'full_tensor'):  # DTensor
+            grad.mul_(clip_coef_clamped)
+        else:
+            grad.mul_(clip_coef_clamped)
+    
+    return total_norm
+
 @click.command()
-@click.option('--model_name', default='ramdisk/Qwen3-30B-A3B-Instruct-2507-stack', help='model name')
+@click.option('--model_name', default='gfs/01be5b33/Qwen3-30B-A3B-Instruct-2507-stack', help='model name')
 @click.option('--batch_size', default=4, help='batch size')
 @click.option('--grad_accumulation', default=1, help='gradient accumulation')
 @click.option('--dataset', default='multipacking-qwen3', help='dataset')
@@ -344,6 +393,7 @@ def main(model_name, batch_size, grad_accumulation, dataset, tp_size):
     torch.set_num_threads(num_threads)
     device_mesh = init_device_mesh(device_type.type, (dp_size, tp_size), mesh_dim_names=("dp", "tp"))
     tp_mesh = device_mesh["tp"]
+    print(tp_mesh)
     dp_mesh = device_mesh["dp"]
     dp_rank = dp_mesh.get_local_rank()
     dp_world_size = dp_mesh.size()
@@ -352,8 +402,6 @@ def main(model_name, batch_size, grad_accumulation, dataset, tp_size):
     warmup_steps = 10
     total_steps = 100
     learning_rate = 1e-4
-
-    os.makedirs(checkpoint_dir, exist_ok=True)
     
     model = Model.from_pretrained(
         model_name, 
@@ -411,18 +459,24 @@ def main(model_name, batch_size, grad_accumulation, dataset, tp_size):
         checkpoint_impl=CheckpointImpl.NO_REENTRANT,
     )
 
+    if rank == 0:
+        print(model)
+
     model_tp_plan = {
         # input shape [1, L]
         # w shape [V_shard, D]
         # output shape [1, L, D]
+        # output type is dtensor
         "embed_tokens": RowwiseParallel(
             input_layouts=Replicate(),
             output_layouts=Replicate(),
+            use_local_output=False,
         ),
         
-        # input shape [1, L, D]
+        # input shape [1, L_shard, D]
         # output shape [1, L_shard, D]
-        "norm": SequenceParallel(),
+        # output type is dtensor
+        "norm": SequenceParallel(use_local_output=True),
     }
 
     parallelize_module(
@@ -436,79 +490,113 @@ def main(model_name, batch_size, grad_accumulation, dataset, tp_size):
             
             # input shape [1, L_shard, D]
             # output shape [1, L_shard, D]
+            # output type is dtensor
             "input_layernorm": SequenceParallel(),
 
-            # input shape [1, L_shard, D], will replicate to become [1, L, D]
             "self_attn": PrepareModuleInput(
-                input_kwarg_layouts={
-                    "hidden_states": Shard(1),
-                },
-                desired_input_kwarg_layouts={
-                    "hidden_states": Replicate(),
-                },
+                input_kwarg_layouts={"hidden_states": Shard(1)},
+                desired_input_kwarg_layouts={"hidden_states": Replicate()},
             ),
 
             # input shape [1, L, D]
             # w shape [D, D_shard]
             # output shape [1, L, D_shard]
+            # output type is tensor
             "self_attn.q_proj.linear": ColwiseParallel(),
 
             # input shape [1, L, D], will shard become [1, L, D_shard]
             # w shape [D_shard, r]
             # output shape [1, L, r]
+            # output type is tensor
             "self_attn.q_proj.lora_A": RowwiseParallel(input_layouts=Replicate()),
             
             # input shape [1, L, r]
             # w shape [r, D_shard]
             # output shape [1, L, D_shard]
+            # output type is tensor
             "self_attn.q_proj.lora_B": ColwiseParallel(),   
 
             # input shape [1, L, D]
             # w shape linear [D, D_shard]
             # output shape [1, L, D_shard]
+            # output type is tensor
             "self_attn.k_proj.linear": ColwiseParallel(),
 
             # input shape [1, L, D], will shard become [1, L, D_shard]
             # w shape [D_shard, r]
             # output shape [1, L, r]
+            # output type is tensor
             "self_attn.k_proj.lora_A": RowwiseParallel(input_layouts=Replicate()),
 
             # input shape [1, L, r]
             # w shape [r, D_shard]
             # output shape [1, L, D_shard]
+            # output type is tensor
             "self_attn.k_proj.lora_B": ColwiseParallel(),
 
             # input shape [1, L, D]
             # w shape linear [D, D_shard]
             # output shape [1, L, D_shard]
+            # output type is tensor
             "self_attn.v_proj.linear": ColwiseParallel(),
 
             # input shape [1, L, D], will shard become [1, L, D_shard]
             # w shape [D_shard, r]
             # output shape [1, L, r]
+            # output type is tensor
             "self_attn.v_proj.lora_A": RowwiseParallel(input_layouts=Replicate()),
 
             # input shape [1, L, r]
             # w shape [r, D_shard]
             # output shape [1, L, D_shard]
+            # output type is tensor
             "self_attn.v_proj.lora_B": ColwiseParallel(),
 
             # input shape [1, L, D_shard]
             # w shape [D_shard, D]
-            # output shape [1, L, D]
-            "self_attn.o_proj.linear": RowwiseParallel(),
+            # output shape [1, L_shard, D]
+            # output type is tensor
+            "self_attn.o_proj.linear": RowwiseParallel(output_layouts=Shard(1), use_local_output=False),
 
             # input shape [1, L, D_shard]
             # w shape [D_shard, r]
             # output shape [1, L, r]
+            # output type is tensor
             "self_attn.o_proj.lora_A": RowwiseParallel(),
 
             # input shape [1, L, r]
             # w shape [r, D_shard]
-            # output shape [1, L, D_shard], but will replicate
-            "self_attn.o_proj.lora_B": ColwiseParallel(output_layouts=Replicate()),
+            # output shape [1, L, D_shard], but will replicate to become [1, L_shard, D]
+            # output type is tensor
+            "self_attn.o_proj.lora_B": ColwiseParallel(output_layouts=Shard(1), use_local_output=False),
 
+            # input shape [1, L_shard, D]
+            # output shape [1, L_shard, D]
+            # output type is dtensor
             "post_attention_layernorm": SequenceParallel(),
+
+            "mlp": PrepareModuleInputOutput(
+                # input is shard shape [1, L_shard, D]
+                # we replicate become [1, L, D]
+                # input become tensor
+                input_layouts=(Shard(1),),
+                desired_input_layouts=(Replicate(),),
+                use_local_input=True,
+                
+                # Output: tuple of (hidden_states, router_logits)
+                # output is tensor shape [1, L, D]
+                # shard it become [1, L_shard, D]
+                # keep as DTensor for residual addition
+                output_layouts=(Replicate(), None),
+                desired_output_layouts=(Shard(1), None),
+                use_local_output=False,  
+            ),
+
+            # input shape [1, L, D], will shard become [1, L, D_shard]
+            # w shape [D_shard, e]
+            # output shape [1, L, e]
+            # output type is tensor
+            "mlp.gate": RowwiseParallel(input_layouts=Replicate()),
         }
         parallelize_module(
             module=block,
@@ -526,7 +614,7 @@ def main(model_name, batch_size, grad_accumulation, dataset, tp_size):
         checkpoint_wrapper_fn=non_reentrant_wrapper,
         check_fn=check_fn,
     )
-    model = torch.compile(model)
+    # model = torch.compile(model)
 
     dataset = Dataset(dataset)
     sampler = DistributedSampler(
@@ -598,7 +686,7 @@ def main(model_name, batch_size, grad_accumulation, dataset, tp_size):
             loss.backward()
             loss_sum += loss
 
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        grad_norm = clip_grad_norm_(model.parameters(), 1.0)
         optim.step()
         scheduler.step()
         optim.zero_grad()
