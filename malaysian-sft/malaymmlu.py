@@ -142,8 +142,12 @@ class VLLMServer:
                 print(f"[WARN] {self.model} HTTP {response.status_code}: {response.text[:500]}")
                 return None
             r = response.json()["choices"][0]["message"]
-            if isinstance(["reasoning_content"], str) and len(r["reasoning_content"]) > 10:
-                t = r["reasoning_content"]
+            reasoning_content = r.get('reasoning_content', '')
+            reasoning = r.get('reasoning', '')
+            if len(reasoning_content) > 10:
+                t = reasoning_content
+            elif len(reasoning) > 10:
+                t = reasoning
             else:
                 t = r["content"]
             return t.strip()
@@ -234,9 +238,6 @@ class MalayMMLUEvaluator:
         ]
 
     def _extract_answer(self, response: str) -> Optional[str]:
-        # print('------')
-        # print(response)
-        # print('------\n\n')
         matches = self.ANSWER_PATTERN.findall(response)
         return matches[0] if len(matches) == 1 else None
 
