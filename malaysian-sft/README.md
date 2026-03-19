@@ -2,18 +2,18 @@
 
 Low Rank SFT on https://huggingface.co/datasets/Scicom-intl/Malaysian-Instructions
 
-## Ablation on multiple models
+## Ablation Setup
 
-1. Ablation on Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, zai-org/GLM-4.5-Air and Qwen/Qwen3-30B-A3B-Instruct-2507, Qwen/Qwen3-235B-A22B-Instruct-2507, openai/gpt-oss-20b and openai/gpt-oss-120b
-2. Dense LoRA SFT done using DeepSpeed Zero3 HF Trainer while MoE LoRA SFT done using FSDP2 + Fused MoE.
+1. Models: Qwen/Qwen3-32B, Qwen/Qwen2.5-72B-Instruct, meta-llama/Llama-3.1-70B-Instruct, zai-org/GLM-4.5-Air, Qwen/Qwen3-30B-A3B-Instruct-2507, Qwen/Qwen3-235B-A22B-Instruct-2507, openai/gpt-oss-20b, openai/gpt-oss-120b
+2. Dense LoRA SFT via DeepSpeed Zero3 HF Trainer; MoE LoRA SFT via FSDP2 + Fused MoE.
 3. Also tried DoRA for Qwen/Qwen3-30B-A3B-Instruct-2507.
-4. Multipacking variable length 16384 context length, with global batch size of 32, so global total tokens is 524288.
-5. All linear layers with rank 256 with alpha multiply by 2.0, for MoE including experts <sup> + </sup>.
+4. Multipacking variable length 16384 context, global batch size 32 (524288 total tokens).
+5. All linear layers rank 256, alpha ×2.0; MoE includes experts <sup>+</sup>.
 6. Liger fused cross entropy.
-7. 1e-4 learning rate, 50 warmup steps, and 3 epoch only.
-8. Calculate accuracy for each epoch using reasoning system prompt.
+7. 1e-4 LR, 50 warmup steps, 3 epochs.
+8. Accuracy evaluated per epoch with reasoning system prompt.
 
-<sup> + </sup> with the rank of each equal to the total rank divided by the number of active experts, https://thinkingmachines.ai/blog/lora/
+<sup>+</sup> MoE expert rank = total rank / num active experts. See https://thinkingmachines.ai/blog/lora/
 
 ## WanDB
 
@@ -21,31 +21,44 @@ https://wandb.ai/aies-scicom-scicom-ai/malaysian-sft
 
 <img src="loss.png" width="50%">
 
-### Overall Benchmark
+## Benchmark Results
+
+Evaluated on https://huggingface.co/datasets/UMxYTLAILabs/MalayMMLU. Each cell shows `standard / reasoning` average accuracy at best checkpoint.
+
+| Model | Checkpoint | STEM | Language | Social Sci | Others | Humanities | **Average** |
+|---|---|---|---|---|---|---|---|
+| Qwen3-32B | 960 | 0.809 / 0.894 | 0.787 / 0.896 | 0.711 / 0.852 | 0.751 / 0.867 | 0.774 / 0.887 | **0.766 / 0.879** |
+| Qwen2.5-72B | 321 | 0.808 / 0.903 | 0.751 / 0.887 | 0.711 / 0.853 | 0.724 / 0.870 | 0.720 / 0.876 | **0.743 / 0.878** |
+| Llama-3.1-70B | 969 | 0.796 / 0.903 | 0.779 / 0.889 | 0.724 / 0.851 | 0.732 / 0.861 | 0.791 / 0.895 | **0.765 / 0.880** |
+| GLM-4.5-Air | 944 | 0.785 / 0.914 | 0.724 / 0.890 | 0.691 / 0.870 | 0.692 / 0.883 | 0.733 / 0.909 | **0.725 / 0.893** |
+| Qwen3-30B-A3B LoRA | 959 | 0.799 / 0.900 | 0.765 / 0.885 | 0.708 / 0.840 | 0.740 / 0.866 | 0.759 / 0.887 | **0.754 / 0.876** |
+| Qwen3-30B-A3B DoRA | 959 | 0.824 / 0.905 | 0.761 / 0.875 | 0.715 / 0.840 | 0.747 / 0.871 | 0.765 / 0.886 | **0.762 / 0.875** |
+| Qwen3-235B-A22B | 639 | 0.833 / 0.899 | 0.787 / 0.897 | 0.746 / 0.857 | 0.775 / 0.880 | 0.815 / 0.908 | **0.791 / 0.888** |
+| gpt-oss-20b | 316 | 0.686 / 0.893 | 0.642 / 0.871 | 0.596 / 0.832 | 0.627 / 0.860 | 0.627 / 0.872 | **0.636 / 0.865** |
+| gpt-oss-120b | 947 | 0.735 / 0.908 | 0.701 / 0.881 | 0.642 / 0.858 | 0.672 / 0.879 | 0.681 / 0.876 | **0.686 / 0.881** |
 
 <img src="accuracy.png" width="50%">
 
-## Finetuning
+## General Workflow
 
-We benchmark using https://huggingface.co/datasets/UMxYTLAILabs/MalayMMLU
+```bash
+# 1. Finetune
+bash <script>.sh
+
+# 2. Run generation
+python3 malaymmlu.py --pattern "<model>-lora-256-*" --num_gpus 8 --gpu_partition <N>
+
+# 3. Calculate accuracy
+python3 calculate_malaymmlu.py --pattern "malaymmlu-<model>-lora-256-*"
+```
+
+## Per-Model Details
 
 ### Qwen/Qwen3-32B
 
-1. Finetune,
-
 ```bash
 bash ds3-qwen3-32b-lora-256.sh
-```
-
-2. Run generation,
-
-```bash
 python3 malaymmlu.py --pattern "ds3-qwen3-32b-lora-256*" --num_gpus 8 --gpu_partition 2
-```
-
-3. Calculate accuracy,
-
-```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-ds3-qwen3-32b-lora-256-checkpoint-*"
 ```
 
@@ -81,21 +94,9 @@ average 0.7507443895318702 0.87592688538857
 
 ### Qwen/Qwen2.5-72B-Instruct
 
-1. Finetune,
-
 ```bash
 bash ds3-qwen2.5-72b-lora-256.sh
-```
-
-2. Run generation,
-
-```bash
 python3 malaymmlu.py --pattern "ds3-qwen2.5-72b-lora-256*" --num_gpus 8 --gpu_partition 4
-```
-
-3. Calculate accuracy,
-
-```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-ds3-qwen2.5-72b-lora-256-checkpoint-*"
 ```
 
@@ -131,21 +132,9 @@ average 0.7331386401040277 0.8708796783323344
 
 ### meta-llama/Llama-3.1-70B-Instruct
 
-1. Finetune,
-
 ```bash
 bash ds3-llama3.1-70b-lora-256.sh
-```
-
-2. Run generation,
-
-```bash
 python3 malaymmlu.py --pattern "ds3-llama3.1-70b-lora-256*" --num_gpus 8 --gpu_partition 4
-```
-
-3. Calculate accuracy,
-
-```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-ds3-llama3.1-70b-lora-256-checkpoint-*"
 ```
 
@@ -181,21 +170,9 @@ average 0.7640102106039417 0.8764299932932479
 
 ### zai-org/GLM-4.5-Air
 
-1. Finetune,
-
 ```bash
 bash fsdp2-fused-moe-glm-4.5-air-lora-256.sh
-```
-
-2. Run generation,
-
-```bash
 python3 malaymmlu.py --pattern "GLM-4.5-Air-lora-256-*" --num_gpus 8 --gpu_partition 4
-```
-
-3. Calculate accuracy,
-
-```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-GLM-4.5-Air-lora-256-*"
 ```
 
@@ -231,21 +208,9 @@ average 0.7069647620334496 0.8873170802973593
 
 ### Qwen/Qwen3-30B-A3B-Instruct-2507
 
-1. Finetune,
-
 ```bash
 bash fsdp2-fused-moe-Qwen3-30B-A3B-lora-256.sh
-```
-
-2. Run generation,
-
-```bash
 python3 malaymmlu.py --pattern "Qwen3-30B-A3B-Instruct-2507-lora-256-*" --num_gpus 8 --gpu_partition 2
-```
-
-3. Calculate accuracy,
-
-```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-Qwen3-30B-A3B-Instruct-2507-lora-256-*"
 ```
 
@@ -281,21 +246,9 @@ average 0.7533717892265589 0.8769859497356121
 
 ### Qwen/Qwen3-30B-A3B-Instruct-2507 DoRA
 
-1. Finetune,
-
 ```bash
 bash fsdp2-fused-moe-Qwen3-30B-A3B-dora-256.sh
-```
-
-2. Run generation,
-
-```bash
 python3 malaymmlu.py --pattern "Qwen3-30B-A3B-Instruct-2507-dora-256-*" --num_gpus 8 --gpu_partition 8
-```
-
-3. Calculate accuracy,
-
-```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-Qwen3-30B-A3B-Instruct-2507-dora-256-*"
 ```
 
@@ -331,21 +284,9 @@ average 0.7622731032779372 0.8752216191892774
 
 ### Qwen/Qwen3-235B-A22B-Instruct-2507
 
-1. Finetune,
-
 ```bash
 bash fsdp2-fused-moe-Qwen3-235B-A22B-lora-256.sh
-```
-
-2. Run generation,
-
-```bash
 python3 malaymmlu.py --pattern "Qwen3-235B-A22B-Instruct-2507-lora-256-*" --num_gpus 8 --gpu_partition 8
-```
-
-3. Calculate accuracy,
-
-```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-Qwen3-235B-A22B-Instruct-2507-lora-256-*"
 ```
 
@@ -381,21 +322,9 @@ average 0.7910729646324846 0.8879157700919238
 
 ### openai/gpt-oss-20b
 
-1. Finetune,
-
 ```bash
 bash fsdp2-fused-moe-gpt-oss-20b-lora-256.sh
-```
-
-2. Run generation,
-
-```bash
 python3 malaymmlu.py --pattern "gpt-oss-20b-lora-256-*" --num_gpus 8 --gpu_partition 4
-```
-
-3. Calculate accuracy,
-
-```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-gpt-oss-20b-lora-256-*"
 ```
 
@@ -431,21 +360,9 @@ average 0.643133916455475 0.8626478255008294
 
 ### openai/gpt-oss-120b
 
-1. Finetune,
-
 ```bash
 bash fsdp2-fused-moe-gpt-oss-120b-lora-256.sh
-```
-
-2. Run generation,
-
-```bash
 python3 malaymmlu.py --pattern "gpt-oss-120b-lora-256-*" --num_gpus 8 --gpu_partition 4
-```
-
-3. Calculate accuracy,
-
-```bash
 python3 calculate_malaymmlu.py --pattern "malaymmlu-gpt-oss-120b-lora-256-*"
 ```
 

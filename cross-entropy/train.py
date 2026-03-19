@@ -51,6 +51,7 @@ from streaming import LocalDataset
 from streaming.base.format.mds.encodings import Encoding, _encodings
 from cut_cross_entropy import linear_cross_entropy
 from liger_kernel.transformers import apply_liger_kernel_to_qwen3, LigerFusedLinearCrossEntropyLoss
+from online_softmax_chunk import _VChunkCrossEntropyTritonFn
 
 apply_liger_kernel_to_qwen3(
     rope=True,
@@ -80,6 +81,9 @@ class ModelArguments:
         },
     )
     use_liger: bool = field(default=True, metadata={"help": "Use liger loss"}, )
+    use_triton: bool = field(default=False, metadata={"help": "Use V-chunk Triton online softmax loss with custom backward"}, )
+    triton_chunk_size: int = field(default=8192, metadata={"help": "Vocab chunk size for V-chunk Triton cross entropy"}, )
+    triton_block_c: int = field(default=128, metadata={"help": "Triton BLOCK_C for the grad_logits kernel"}, )
     cce_impl: str = field(default="cce_kahan_full_c", metadata={"help": "CCE implementation"}, )
     model_dtype: str = field(default="bfloat16", metadata={"help": "model dtype"}, )
 
@@ -157,6 +161,43 @@ class Model(Qwen3ForCausalLM):
             loss = loss / num_items_in_batch
             return {'loss': loss}
         return super_out
+
+class ModelTriton(Qwen3ForCausalLM):
+    def __init__(self, config):
+        super().__init__(config)
+
+    def forward(self, input_ids, attention_mask=None, position_ids=None, labels=None, num_items_in_batch=None, **kwargs):
+        super_out = self.model.forward(
+            input_ids=input_ids,
+            position_ids=position_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            **kwargs,
+        )
+        if labels is not None:
+            embeddings = super_out.last_hidden_state
+            embeddings = embeddings[:, :-1].reshape(-1, embeddings.shape[-1])
+            labels = labels[..., 1:].contiguous().reshape(-1)
+            valid = labels != -100
+            embeddings = embeddings[valid].contiguous()
+            labels_valid = labels[valid].contiguous()
+            logprobs = _VChunkCrossEntropyTritonFn.apply(
+                embeddings,
+                self.lm_head.weight,
+                labels_valid,
+                self.config.triton_chunk_size,
+                self.config.triton_block_c,
+            )
+            loss = -logprobs.sum()
+            if num_items_in_batch is not None:
+                if torch.is_tensor(num_items_in_batch):
+                    num_items_in_batch = num_items_in_batch.to(loss.device)
+                loss = loss / num_items_in_batch
+            else:
+                loss = loss / valid.sum()
+            return {'loss': loss}
+        return super_out
+
 
 class WandbMFUCallback(TrainerCallback):
     def __init__(self, num_flops_per_token):
@@ -255,6 +296,8 @@ def main():
 
     if model_args.use_liger:
         model_class = Model
+    elif model_args.use_triton:
+        model_class = ModelTriton
     else:
         model_class = ModelCCE
 
@@ -263,8 +306,11 @@ def main():
         attn_implementation = 'flash_attention_3',
         torch_dtype = model_args.model_dtype,
     )
-    if not model_args.use_liger:
+    if not model_args.use_liger and not model_args.use_triton:
         model.config.cce_impl = model_args.cce_impl
+    if model_args.use_triton:
+        model.config.triton_chunk_size = model_args.triton_chunk_size
+        model.config.triton_block_c = model_args.triton_block_c
     model.resize_token_embeddings(len(tokenizer), mean_resizing=False, pad_to_multiple_of=8)
     print(model)
 
