@@ -1,0 +1,14 @@
+torch>=2.7.0
+transformers==4.57.1
+accelerate
+wandb
+liger-kernel==0.6.2
+chinidataset @ git+https://github.com/Scicom-AI-Enterprise-Organization/ChiniDataset.git
+flash-attn==3.0.0b1
+datasets
+huggingface_hub
+multiprocess
+tqdm
+pandas
+numpy
+boto3
