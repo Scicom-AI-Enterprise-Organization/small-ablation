@@ -233,9 +233,26 @@ def main():
     print('=' * 60)
 
     ds_call_center = load_dataset('Scicom-intl/Call-Center-Language-Switching')
-    ds_function_call = load_dataset('Scicom-intl/Function-Call')
     ds_multiturn = load_dataset('mesolitica/Malaysian-Multiturn-Chat-Assistant')
     ds_speech = load_dataset('mesolitica/Malaysian-Speech-Instructions')
+
+    # Function-Call has multiple configs - load all of them
+    FUNCTION_CALL_CONFIGS = [
+        'extended_functions', 'extended_functions_v2',
+        'functions', 'functions_multilingual_examples',
+        'functions_multilingual_examples_v2',
+        'multifunctions', 'multifunctions_deep', 'multifunctions_deep_v2',
+        'multifunctions_multiturn', 'multifunctions_multiturn_extra',
+        'multifunctions_multiturn_language_switching',
+        'multifunctions_multiturn_language_switching_extra',
+        'multifunctions_multiturn_v2_deep',
+        'multifunctions_v2',
+        'telco_multifunctions_premium', 'telco_multifunctions_premium_multiturn',
+    ]
+    ds_function_call_all = {}
+    for cfg in FUNCTION_CALL_CONFIGS:
+        print(f'  Loading Function-Call/{cfg}...')
+        ds_function_call_all[cfg] = load_dataset('Scicom-intl/Function-Call', cfg)
 
     # ----- Step 2: Convert to unified format -----
     print('\n' + '=' * 60)
@@ -243,9 +260,10 @@ def main():
     print('=' * 60)
 
     all_data = []
+
+    # Call Center Language Switching
     for name, ds in [
         ('call-center-language-switching', ds_call_center),
-        ('function-call', ds_function_call),
         ('multiturn-chat', ds_multiturn),
         ('speech-instructions', ds_speech),
     ]:
@@ -255,6 +273,17 @@ def main():
             split = list(ds.keys())[0]
         for row in tqdm(ds[split]):
             unified = convert_to_unified(row, name)
+            if unified:
+                all_data.append(unified)
+
+    # Function-Call (all configs)
+    for cfg, ds in ds_function_call_all.items():
+        print(f'\nConverting function-call/{cfg}...')
+        split = 'train'
+        if split not in ds:
+            split = list(ds.keys())[0]
+        for row in tqdm(ds[split]):
+            unified = convert_to_unified(row, f'function-call/{cfg}')
             if unified:
                 all_data.append(unified)
 
