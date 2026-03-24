@@ -4,7 +4,8 @@ accelerate
 wandb
 liger-kernel==0.6.2
 chinidataset @ git+https://github.com/Scicom-AI-Enterprise-Organization/ChiniDataset.git
-flash-attn==3.0.0b1
+# flash-attn: install separately, not on PyPI for FA3
+# pip install flash-attn --no-build-isolation
 datasets
 huggingface_hub
 multiprocess
