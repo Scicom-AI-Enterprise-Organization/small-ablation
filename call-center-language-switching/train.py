@@ -68,6 +68,10 @@ class DataTrainingArguments:
         default=None,
         metadata={"help": "Path to chinidataset parquet streaming dataset directory"},
     )
+    test_file: Optional[str] = field(
+        default=None,
+        metadata={"help": "Path to chinidataset parquet test dataset directory"},
+    )
     block_size: Optional[int] = field(
         default=8192,
         metadata={"help": "Multipacking block size (sequence length)"},
@@ -98,8 +102,12 @@ class Model(Qwen3ForCausalLM):
             labels = labels[..., 1:].contiguous()
             labels = labels.reshape(-1)
             loss = self.loss(self.lm_head.weight, embeddings, labels)
-            num_items_in_batch = num_items_in_batch.to(loss.device)
-            loss = loss / num_items_in_batch
+            if num_items_in_batch is not None:
+                num_items_in_batch = num_items_in_batch.to(loss.device)
+                loss = loss / num_items_in_batch
+            else:
+                # eval mode: normalize by number of non-ignored tokens
+                loss = loss / (labels != -100).sum()
             return {'loss': loss}
         return super_out
 
@@ -194,6 +202,11 @@ def main():
     dataset = DatasetFixed(data_args.train_file)
     print('dataset', len(dataset), dataset[0]['attention_mask'].shape)
 
+    eval_dataset = None
+    if data_args.test_file:
+        eval_dataset = DatasetFixed(data_args.test_file)
+        print('eval_dataset', len(eval_dataset))
+
     def collator(batch):
         batch = [b for b in batch if b is not None]
         input_ids = [b['input_ids'] for b in batch]
@@ -235,14 +248,21 @@ def main():
         model=model,
         args=training_args,
         train_dataset=dataset,
-        eval_dataset=None,
+        eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         data_collator=collator,
         compute_metrics=None,
         preprocess_logits_for_metrics=None,
         callbacks=[WandbMFUCallback(num_flops_per_token, gpu_flops=gpu_flops)],
     )
-    trainer.train()
+    resume = training_args.resume_from_checkpoint
+    if resume == "true":
+        # Find the latest checkpoint in output_dir
+        import glob
+        checkpoints = sorted(glob.glob(os.path.join(training_args.output_dir, "checkpoint-*")),
+                             key=lambda x: int(x.split("-")[-1]))
+        resume = checkpoints[-1] if checkpoints else None
+    trainer.train(resume_from_checkpoint=resume)
 
 
 if __name__ == "__main__":
