@@ -1,0 +1,15 @@
+torch>=2.7.0
+transformers==4.57.1
+accelerate
+wandb
+liger-kernel==0.6.2
+chinidataset @ git+https://github.com/Scicom-AI-Enterprise-Organization/ChiniDataset.git
+# flash-attn: install separately, not on PyPI for FA3
+# pip install flash-attn --no-build-isolation
+datasets
+huggingface_hub
+multiprocess
+tqdm
+pandas
+numpy
+boto3
