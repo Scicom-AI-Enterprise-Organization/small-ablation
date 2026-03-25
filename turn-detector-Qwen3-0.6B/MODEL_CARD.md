@@ -114,6 +114,42 @@ print(f"P(turn complete) = {prob:.4f}")  # ~0.00
 | Positive (turn complete) | 0.8817 | 0.9569 | 0.0046 | 0.9997 |
 | Negative (turn incomplete) | 0.0010 | 0.0000 | 0.0000 | 0.2509 |
 
+## Dataset
+
+Tokenized parquet datasets (chinidataset format) available at [Scicom-intl/turn-detector-Qwen3-0.6B-dataset](https://huggingface.co/datasets/Scicom-intl/turn-detector-Qwen3-0.6B-dataset).
+
+```
+turn-detector-Qwen3-0.6B-dataset/
+├── train-merged/   # multipacked 8192-token blocks (ready for training)
+├── train/          # per-worker shards before merging
+└── test/           # test set (positive + negative samples)
+```
+
+### Download & use with StreamingDataset
+
+```python
+from huggingface_hub import snapshot_download
+from chinidataset import StreamingDataset
+
+# Download dataset
+snapshot_download(
+    repo_id="Scicom-intl/turn-detector-Qwen3-0.6B-dataset",
+    repo_type="dataset",
+    local_dir="./turn-detector-data",
+)
+
+# Load with StreamingDataset
+train_ds = StreamingDataset(local="./turn-detector-data/train-merged")
+test_ds = StreamingDataset(local="./turn-detector-data/test")
+
+print(f"Train: {len(train_ds)} blocks")
+print(f"Test: {len(test_ds)} samples")
+
+# Access a sample
+sample = train_ds[0]
+print(sample.keys())  # dict_keys(['input_ids', 'attention_mask', ...])
+```
+
 ## Training
 
 - **Base model:** Qwen/Qwen3-0.6B
