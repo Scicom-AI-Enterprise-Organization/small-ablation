@@ -9,7 +9,7 @@ Fine-tuned Qwen3-0.6B for turn-end detection in multilingual call center convers
 
 ## Eval Session 1: Synthetic Test Set
 
-**Test set:** 238 samples (119 positive + 119 negative), generated via GPT-4o-mini, 1-2 turns per conversation, 12 language pairs.
+**Test set:** [Scicom-intl/Evaluation-Malaysian-Turn-Detector](https://huggingface.co/datasets/Scicom-intl/Evaluation-Malaysian-Turn-Detector) — 238 synthetic samples (119 positive + 119 negative), 1-2 turns per conversation, 12 language pairs.
 
 ### Baseline vs Qwen3-0.6B
 
@@ -72,9 +72,8 @@ Fine-tuned Qwen3-0.6B for turn-end detection in multilingual call center convers
 
 ## Dataset
 
-- Train: positive samples only (complete conversations with `<|im_end|>`)
-- Test (original): 1200 samples (600 positive + 600 negative), 50 conversations per language pair
-- Test (synthetic): 238 samples (119 positive + 119 negative), GPT-4o-mini generated, 1-2 turns
+- Train: positive samples only (complete conversations with `<|im_end|>`) — `s3://aies-research-datasets/call-center-language-switching/parquet-train-merged-v2/`
+- Evaluation: [Scicom-intl/Evaluation-Malaysian-Turn-Detector](https://huggingface.co/datasets/Scicom-intl/Evaluation-Malaysian-Turn-Detector) — 238 synthetic samples (119 positive + 119 negative), 1-2 turns per conversation, 12 language pairs
 
 ### Sources
 
@@ -84,12 +83,3 @@ Fine-tuned Qwen3-0.6B for turn-end detection in multilingual call center convers
 | Function Call | [Scicom-intl/Function-Call](https://huggingface.co/datasets/Scicom-intl/Function-Call) |
 | Malaysian Multiturn Chat Assistant | [mesolitica/Malaysian-Multiturn-Chat-Assistant](https://huggingface.co/datasets/mesolitica/Malaysian-Multiturn-Chat-Assistant) |
 | Malaysian Speech Instructions | [mesolitica/Malaysian-Speech-Instructions](https://huggingface.co/datasets/mesolitica/Malaysian-Speech-Instructions) |
-| Evaluation (synthetic test set) | [Scicom-intl/Evaluation-Malaysian-Turn-Detector](https://huggingface.co/datasets/Scicom-intl/Evaluation-Malaysian-Turn-Detector) |
-
-### S3
-
-| Split | Path |
-|-------|------|
-| Train | `s3://aies-research-datasets/call-center-language-switching/parquet-train-merged-v2/` |
-| Test | `s3://aies-research-datasets/call-center-language-switching/parquet-test-v2/` |
-| Test (synthetic) | `s3://aies-research-datasets/call-center-language-switching/parquet-test-synthetic/` |
