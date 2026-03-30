@@ -1,0 +1,11 @@
+[project]
+name = "functions-benchmark"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "datasets>=4.6.0",
+    "huggingface>=0.0.1",
+    "openai>=2.15.0",
+]

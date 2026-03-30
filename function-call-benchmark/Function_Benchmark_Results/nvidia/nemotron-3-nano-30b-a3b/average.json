@@ -1,0 +1,55 @@
+{
+  "model": "nvidia/nemotron-3-nano-30b-a3b",
+  "dataset": "Scicom-intl/Function-Call/telco_multifunctions_premium_multiturn",
+  "splits": [
+    "test",
+    "test_zh",
+    "test_ms"
+  ],
+  "total_turns": 1130,
+  "total_params": 4430,
+  "perfect_parameter_turns": 252,
+  "api_failed_calls": 0,
+  "average_function_accuracy": 0.7712460782610292,
+  "average_parameter_accuracy": 0.47589774634608156,
+  "average_turn_level_parameter_accuracy": 0.22904026108086284,
+  "average_argument_similarity": 0.5047755943935752,
+  "api_statistics": {
+    "successful_calls": 1130,
+    "failed_calls": 0,
+    "total_retries": 0,
+    "success_rate": 1.0
+  },
+  "individual_results": {
+    "test": {
+      "total_turns": 523,
+      "total_params": 2172,
+      "perfect_parameter_turns": 104,
+      "api_failed_calls": 0,
+      "function_accuracy": 0.732484076433121,
+      "parameter_accuracy": 0.44843462246777166,
+      "turn_level_parameter_accuracy": 0.1988527724665392,
+      "argument_similarity": 0.48744413125495695
+    },
+    "test_zh": {
+      "total_turns": 311,
+      "total_params": 1176,
+      "perfect_parameter_turns": 72,
+      "api_failed_calls": 0,
+      "function_accuracy": 0.7638888888888888,
+      "parameter_accuracy": 0.47278911564625853,
+      "turn_level_parameter_accuracy": 0.2315112540192926,
+      "argument_similarity": 0.49524184581108865
+    },
+    "test_ms": {
+      "total_turns": 296,
+      "total_params": 1082,
+      "perfect_parameter_turns": 76,
+      "api_failed_calls": 0,
+      "function_accuracy": 0.8173652694610778,
+      "parameter_accuracy": 0.5064695009242144,
+      "turn_level_parameter_accuracy": 0.25675675675675674,
+      "argument_similarity": 0.53164080611468
+    }
+  }
+}

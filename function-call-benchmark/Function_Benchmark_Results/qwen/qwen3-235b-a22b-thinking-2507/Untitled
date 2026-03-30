@@ -1,0 +1,38 @@
+import json
+from tabulate import tabulate
+
+model_dir = "/home/sharukh/Functions_Benchmark/Function_Benchmark_Results/qwen/qwen3-235b-a22b-thinking-2507"
+
+with open(f"{model_dir}/average.json") as f:
+    avg = json.load(f)
+with open(f"{model_dir}/test.json") as f:
+    test = json.load(f)
+with open(f"{model_dir}/test_zh.json") as f:
+    test_zh = json.load(f)
+with open(f"{model_dir}/test_ms.json") as f:
+    test_ms = json.load(f)
+
+model = avg['model']
+
+# Table 1
+print("Overall Performance Comparison\n")
+overall = [[
+    model,
+    f"{avg['average_function_accuracy']:.2%}",
+    f"{avg['average_parameter_accuracy']:.2%}",
+    f"{avg['average_turn_level_parameter_accuracy']:.2%}",
+    f"{avg['average_argument_similarity']:.2%}",
+]]
+print(tabulate(overall, headers=["Model", "Avg Func Acc", "Avg Param Acc", "Avg Turn-Level", "Avg Arg Sim"], tablefmt="grid"))
+
+print()
+
+# Table 2
+print("Language-Specific Performance (Function Accuracy)\n")
+lang = [[
+    model,
+    f"{test['function_accuracy']:.2%}",
+    f"{test_zh['function_accuracy']:.2%}",
+    f"{test_ms['function_accuracy']:.2%}",
+]]
+print(tabulate(lang, headers=["Model", "English", "Mandarin", "Malay"], tablefmt="grid"))

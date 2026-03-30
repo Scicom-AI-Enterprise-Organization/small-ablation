@@ -1,0 +1,55 @@
+{
+  "model": "z-ai/glm-5",
+  "dataset": "Scicom-intl/Function-Call/telco_multifunctions_premium_multiturn",
+  "splits": [
+    "test",
+    "test_zh",
+    "test_ms"
+  ],
+  "total_turns": 1130,
+  "total_params": 4430,
+  "perfect_parameter_turns": 327,
+  "api_failed_calls": 0,
+  "average_function_accuracy": 0.8672608642757896,
+  "average_parameter_accuracy": 0.5469487458317376,
+  "average_turn_level_parameter_accuracy": 0.2930252696795583,
+  "average_argument_similarity": 0.6366354159622477,
+  "api_statistics": {
+    "successful_calls": 1130,
+    "failed_calls": 0,
+    "total_retries": 0,
+    "success_rate": 1.0
+  },
+  "individual_results": {
+    "test": {
+      "total_turns": 523,
+      "total_params": 2172,
+      "perfect_parameter_turns": 144,
+      "api_failed_calls": 0,
+      "function_accuracy": 0.8728139904610492,
+      "parameter_accuracy": 0.5465009208103131,
+      "turn_level_parameter_accuracy": 0.27533460803059273,
+      "argument_similarity": 0.6425097462028212
+    },
+    "test_zh": {
+      "total_turns": 311,
+      "total_params": 1176,
+      "perfect_parameter_turns": 89,
+      "api_failed_calls": 0,
+      "function_accuracy": 0.8543417366946778,
+      "parameter_accuracy": 0.5204081632653061,
+      "turn_level_parameter_accuracy": 0.2861736334405145,
+      "argument_similarity": 0.616576142636968
+    },
+    "test_ms": {
+      "total_turns": 296,
+      "total_params": 1082,
+      "perfect_parameter_turns": 94,
+      "api_failed_calls": 0,
+      "function_accuracy": 0.8746268656716418,
+      "parameter_accuracy": 0.5739371534195934,
+      "turn_level_parameter_accuracy": 0.31756756756756754,
+      "argument_similarity": 0.6508203590469537
+    }
+  }
+}
