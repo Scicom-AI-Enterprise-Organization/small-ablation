@@ -39,7 +39,7 @@ Metrics averaged across all three language splits
 
 | Model                              | Avg Func Acc | Avg Param Acc | Avg Turn-Level | Avg Arg Sim |
 | ---------------------------------- | ------------ | ------------- | -------------- | ----------- |
-| z-ai/glm-4.7                       | 90.49%       | 61.27%        | 35.96%         | 70.65%      |
+| z-ai/glm-4.7                       | **90.49%**   | **61.27%**    | **35.96%**     | **70.65%**  |
 | qwen/qwen3.5-27b                   | 86.74%       | 57.47%        | 29.96%         | 65.24%      |
 | z-ai/glm-5                         | 86.73%       | 54.69%        | 29.30%         | 63.66%      |
 | qwen/qwen3.5-397b-a17b             | 86.64%       | 58.64%        | 33.97%         | 66.04%      |
@@ -61,7 +61,7 @@ Metrics averaged across all three language splits
 
 | Model | English | Mandarin | Malay |
 |-------|:-------:|:--------:|:-----:|
-| z-ai/glm-4.7 | 90.81% | 89.42% | 91.24% |
+| z-ai/glm-4.7 | **90.81%** | **89.42%** | **91.24%** |
 | z-ai/glm-5 | 87.28% | 85.43% | 87.46% |
 | qwen/qwen3.5-397b-a17b | 87.08% | 86.12% | 86.71% |
 | qwen/qwen3.5-27b | 86.51% | 85.54% | 88.16% |
