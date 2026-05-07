@@ -1,7 +1,8 @@
-  # Function Call Benchmark                                                                                                                             
+# Function Call Benchmark
+
 Evaluates LLM function-calling accuracy on the `Scicom-intl/Function-Call` dataset (Telco multi-function multi-turn) across three language splits:    English, Mandarin, and Malay.                                                                                                                         
-                                                                                                                                                        
-  ## Setup & Usage
+
+## Setup & Usage
 
 ```bash
 uv sync
@@ -18,19 +19,20 @@ Results are saved to `results/` as JSON files per split, plus `results/average.j
 
 ## How It Works
 
-  - Loads multi-turn conversations with expected tool calls from HuggingFace                                                                            
-  - Sends each turn to the model via OpenRouter and compares predicted vs expected tool calls
-  - Supports parallel workers, checkpointing, and automatic retries with exponential backoff                                                            
-                                                                                                                                                        
-  ## Metrics                                                                                                                                            
-                                                                                                                                                        
-  | Metric | Description |
-  |--------|-------------|
-  | **Function Accuracy** | % of calls where the correct function was predicted |                                                                       
-  | **Parameter Accuracy** | % of individual parameters with correct values |
-  | **Turn-Level Perfect** | % of turns where all functions and params were exactly correct |                                                           
-  | **Argument Similarity** | String similarity score between predicted and expected arguments |                                                        
-                                                                                                   
+- Loads multi-turn conversations with expected tool calls from HuggingFace                                                                            
+- Sends each turn to the model via OpenRouter and compares predicted vs expected tool calls
+- Supports parallel workers, checkpointing, and automatic retries with exponential backoff
+
+## Metrics
+
+
+| Metric                  | Description                                                      |
+| ----------------------- | ---------------------------------------------------------------- |
+| **Function Accuracy**   | % of calls where the correct function was predicted              |
+| **Parameter Accuracy**  | % of individual parameters with correct values                   |
+| **Turn-Level Perfect**  | % of turns where all functions and params were exactly correct   |
+| **Argument Similarity** | String similarity score between predicted and expected arguments |
+
 
 ## Overall Performance Comparison
 
@@ -38,13 +40,15 @@ Metrics averaged across all three language splits
 
 
 | Model                              | Total Params | Active Params | Avg Func Acc | Avg Param Acc | Avg Turn-Level | Avg Arg Sim |
-| ---------------------------------- | :----------: | :-----------: | ------------ | ------------- | -------------- | ----------- |
+| ---------------------------------- | ------------ | ------------- | ------------ | ------------- | -------------- | ----------- |
 | z-ai/glm-4.7                       | 358B         | 32B           | **90.49%**   | **61.27%**    | **35.96%**     | **70.65%**  |
 | qwen/qwen3.5-27b                   | 27B          | dense         | 86.74%       | 57.47%        | 29.96%         | 65.24%      |
 | z-ai/glm-5                         | 744B         | 40B           | 86.73%       | 54.69%        | 29.30%         | 63.66%      |
 | qwen/qwen3.5-397b-a17b             | 397B         | 17B           | 86.64%       | 58.64%        | 33.97%         | 66.04%      |
 | qwen/qwen3.5-35b-a3b               | 35B          | 3B            | 85.71%       | 56.15%        | 28.97%         | 61.84%      |
 | qwen/qwen3.5-122b-a10b             | 122B         | 10B           | 85.57%       | 57.74%        | 32.65%         | 64.56%      |
+| qwen/qwen3.6-27b                   | 27B          | dense         | 83.60%       | 54.76%        | 27.69%         | 61.63%      |
+| qwen/qwen3.6-35b-a3b               | 35B          | 3B            | 83.50%       | 53.80%        | 28.89%         | 61.98%      |
 | qwen/qwen3-235b-a22b-thinking-2507 | 235B         | 22B           | 82.26%       | 52.51%        | 25.08%         | 59.29%      |
 | qwen/qwen3.5-9b                    | 9B           | dense         | 81.75%       | 51.78%        | 26.18%         | 59.34%      |
 | z-ai/glm-4.7-flash                 | 30B          | ~3.6B         | 81.48%       | 50.42%        | 23.15%         | 56.32%      |
@@ -55,26 +59,27 @@ Metrics averaged across all three language splits
 | nvidia/nemotron-3-super-120b-a12b  | 120B         | 12B           | 66.42%       | 42.27%        | 21.51%         | 44.83%      |
 
 
-
-
 ## Language-Specific Performance (Function Accuracy)
 
-| Model | English | Mandarin | Malay |
-|-------|:-------:|:--------:|:-----:|
-| z-ai/glm-4.7 | **90.81%** | **89.42%** | **91.24%** |
-| z-ai/glm-5 | 87.28% | 85.43% | 87.46% |
-| qwen/qwen3.5-397b-a17b | 87.08% | 86.12% | 86.71% |
-| qwen/qwen3.5-27b | 86.51% | 85.54% | 88.16% |
-| qwen/qwen3.5-35b-a3b | 85.71% | 82.96% | 88.45% |
-| qwen/qwen3.5-122b-a10b | 85.59% | 85.85% | 85.28% |
-| qwen/qwen3.5-9b | 84.10% | 79.94% | 81.19% |
-| qwen/qwen3-235b-a22b-thinking-2507 | 83.10% | 78.47% | 85.20% |
-| z-ai/glm-4.7-flash | 80.13% | 78.96% | 85.37% |
-| qwen/qwen3-30b-a3b-thinking-2507 | 78.96% | 76.39% | 82.87% |
-| qwen/qwen3-32b | 78.66% | 73.54% | 77.27% |
-| nvidia/nemotron-3-nano-30b-a3b | 73.25% | 76.39% | 81.74% |
-| openai/gpt-oss-120b | 72.84% | 73.17% | 76.81% |
-| nvidia/nemotron-3-super-120b-a12b | 70.03% | 63.90% | 65.32% |
+
+| Model                              | English    | Mandarin   | Malay      |
+| ---------------------------------- | ---------- | ---------- | ---------- |
+| z-ai/glm-4.7                       | **90.81%** | **89.42%** | **91.24%** |
+| z-ai/glm-5                         | 87.28%     | 85.43%     | 87.46%     |
+| qwen/qwen3.5-397b-a17b             | 87.08%     | 86.12%     | 86.71%     |
+| qwen/qwen3.5-27b                   | 86.51%     | 85.54%     | 88.16%     |
+| qwen/qwen3.5-35b-a3b               | 85.71%     | 82.96%     | 88.45%     |
+| qwen/qwen3.5-122b-a10b             | 85.59%     | 85.85%     | 85.28%     |
+| qwen/qwen3.5-9b                    | 84.10%     | 79.94%     | 81.19%     |
+| qwen/qwen3.6-35b-a3b               | 83.78%     | 78.24%     | 88.48%     |
+| qwen/qwen3.6-27b                   | 83.49%     | 81.84%     | 85.45%     |
+| qwen/qwen3-235b-a22b-thinking-2507 | 83.10%     | 78.47%     | 85.20%     |
+| z-ai/glm-4.7-flash                 | 80.13%     | 78.96%     | 85.37%     |
+| qwen/qwen3-30b-a3b-thinking-2507   | 78.96%     | 76.39%     | 82.87%     |
+| qwen/qwen3-32b                     | 78.66%     | 73.54%     | 77.27%     |
+| nvidia/nemotron-3-nano-30b-a3b     | 73.25%     | 76.39%     | 81.74%     |
+| openai/gpt-oss-120b                | 72.84%     | 73.17%     | 76.81%     |
+| nvidia/nemotron-3-super-120b-a12b  | 70.03%     | 63.90%     | 65.32%     |
 
 
-Detailed per-model results with per-language breakdowns, per-function stats, and failure logs are available in [`Function_Benchmark_Results/`](./Function_Benchmark_Results), organized by provider and model.
+Detailed per-model results with per-language breakdowns, per-function stats, and failure logs are available in `[Function_Benchmark_Results/](./Function_Benchmark_Results)`, organized by provider and model.
