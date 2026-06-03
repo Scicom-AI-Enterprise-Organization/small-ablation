@@ -1,0 +1,28 @@
+{
+  "model": "zai-org/GLM-4.7-Flash",
+  "total": 2981,
+  "matched": 1579,
+  "accuracy": 0.5296880241529688,
+  "per_language": {
+    "malay": {
+      "total": 504,
+      "matched": 148,
+      "accuracy": 0.29365079365079366
+    },
+    "chinese": {
+      "total": 786,
+      "matched": 177,
+      "accuracy": 0.22519083969465647
+    },
+    "english": {
+      "total": 956,
+      "matched": 662,
+      "accuracy": 0.6924686192468619
+    },
+    "tamil": {
+      "total": 735,
+      "matched": 592,
+      "accuracy": 0.8054421768707483
+    }
+  }
+}
