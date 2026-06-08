@@ -1,0 +1,28 @@
+{
+  "model": "google/gemma-4-31B-it",
+  "total": 3001,
+  "matched": 1916,
+  "accuracy": 0.6384538487170943,
+  "per_language": {
+    "tamil": {
+      "total": 746,
+      "matched": 678,
+      "accuracy": 0.9088471849865952
+    },
+    "malay": {
+      "total": 506,
+      "matched": 415,
+      "accuracy": 0.8201581027667985
+    },
+    "english": {
+      "total": 960,
+      "matched": 266,
+      "accuracy": 0.27708333333333335
+    },
+    "chinese": {
+      "total": 789,
+      "matched": 557,
+      "accuracy": 0.70595690747782
+    }
+  }
+}

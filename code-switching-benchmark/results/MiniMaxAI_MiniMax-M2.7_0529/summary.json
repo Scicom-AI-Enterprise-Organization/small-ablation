@@ -1,0 +1,28 @@
+{
+  "model": "MiniMaxAI/MiniMax-M2.7",
+  "total": 2997,
+  "matched": 1938,
+  "accuracy": 0.6466466466466466,
+  "per_language": {
+    "malay": {
+      "total": 505,
+      "matched": 162,
+      "accuracy": 0.3207920792079208
+    },
+    "tamil": {
+      "total": 744,
+      "matched": 671,
+      "accuracy": 0.9018817204301075
+    },
+    "chinese": {
+      "total": 788,
+      "matched": 219,
+      "accuracy": 0.2779187817258883
+    },
+    "english": {
+      "total": 960,
+      "matched": 886,
+      "accuracy": 0.9229166666666667
+    }
+  }
+}

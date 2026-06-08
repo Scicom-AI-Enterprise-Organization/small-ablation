@@ -1,0 +1,28 @@
+{
+  "model": "mistralai/Mistral-Small-4-119B-2603",
+  "total": 2947,
+  "matched": 1937,
+  "accuracy": 0.657278588394978,
+  "per_language": {
+    "tamil": {
+      "total": 722,
+      "matched": 573,
+      "accuracy": 0.7936288088642659
+    },
+    "malay": {
+      "total": 500,
+      "matched": 430,
+      "accuracy": 0.86
+    },
+    "chinese": {
+      "total": 776,
+      "matched": 583,
+      "accuracy": 0.7512886597938144
+    },
+    "english": {
+      "total": 949,
+      "matched": 351,
+      "accuracy": 0.3698630136986301
+    }
+  }
+}

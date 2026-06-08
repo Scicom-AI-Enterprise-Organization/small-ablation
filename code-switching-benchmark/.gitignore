@@ -1,0 +1,5 @@
+cleaned_dataset*
+result/
+trash/
+.venv
+*.bin

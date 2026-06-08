@@ -1,0 +1,28 @@
+{
+  "model": "Qwen/Qwen3.5-35B-A3B",
+  "total": 2872,
+  "matched": 1712,
+  "accuracy": 0.596100278551532,
+  "per_language": {
+    "malay": {
+      "total": 496,
+      "matched": 150,
+      "accuracy": 0.3024193548387097
+    },
+    "english": {
+      "total": 922,
+      "matched": 869,
+      "accuracy": 0.9425162689804772
+    },
+    "tamil": {
+      "total": 674,
+      "matched": 655,
+      "accuracy": 0.9718100890207715
+    },
+    "chinese": {
+      "total": 780,
+      "matched": 38,
+      "accuracy": 0.04871794871794872
+    }
+  }
+}
