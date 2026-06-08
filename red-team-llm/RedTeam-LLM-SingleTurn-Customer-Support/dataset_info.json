@@ -1,0 +1,62 @@
+{
+  "citation": "",
+  "description": "",
+  "features": {
+    "industry": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "attack_type": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "language": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "severity": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "tone": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "system_prompt": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "input": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "attack_description": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "target_behavior": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "expected_safe_response": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "model": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "embedding": {
+      "feature": {
+        "feature": {
+          "dtype": "float64",
+          "_type": "Value"
+        },
+        "_type": "List"
+      },
+      "_type": "List"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}

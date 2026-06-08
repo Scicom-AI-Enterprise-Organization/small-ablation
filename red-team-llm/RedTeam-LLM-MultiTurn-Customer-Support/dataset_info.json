@@ -1,0 +1,134 @@
+{
+  "citation": "",
+  "description": "",
+  "features": {
+    "industry": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "attack_type": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "attack_strategy": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "language": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "severity": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "tone": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "system_prompt": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "conversation": {
+      "feature": {
+        "role": {
+          "dtype": "string",
+          "_type": "Value"
+        },
+        "content": {
+          "dtype": "string",
+          "_type": "Value"
+        },
+        "system_note": {
+          "dtype": "string",
+          "_type": "Value"
+        },
+        "assistant": {
+          "dtype": "string",
+          "_type": "Value"
+        },
+        "role \"ad": {
+          "dtype": "string",
+          "_type": "Value"
+        },
+        "}, {\"role": {
+          "dtype": "string",
+          "_type": "Value"
+        },
+        "attack_turn_index": {
+          "dtype": "int64",
+          "_type": "Value"
+        },
+        "content_id": {
+          "dtype": "int64",
+          "_type": "Value"
+        },
+        "attack_turn": {
+          "dtype": "bool",
+          "_type": "Value"
+        },
+        "role ": {
+          "dtype": "string",
+          "_type": "Value"
+        }
+      },
+      "_type": "List"
+    },
+    "attack_turn_index": {
+      "dtype": "float64",
+      "_type": "Value"
+    },
+    "turn_count": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "attack_description": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "target_behavior": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "expected_safe_response": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "failure_mode": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "evaluation_tags": {
+      "feature": {
+        "dtype": "string",
+        "_type": "Value"
+      },
+      "_type": "List"
+    },
+    "model": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "conversation_is_valid": {
+      "dtype": "bool",
+      "_type": "Value"
+    },
+    "last_turn_is_assistant": {
+      "dtype": "bool",
+      "_type": "Value"
+    },
+    "embedding": {
+      "feature": {
+        "feature": {
+          "dtype": "float64",
+          "_type": "Value"
+        },
+        "_type": "List"
+      },
+      "_type": "List"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}

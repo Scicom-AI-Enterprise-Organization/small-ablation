@@ -1,0 +1,638 @@
+Resuming: 1788 already done, 0 remaining.
+Output : benchmark_results/singleturn_qwen_qwen3.6-27b.jsonl
+
+
+════════════════════════════════════════════════════════════════
+  Red-Team Benchmark Results
+  Target : qwen/qwen3.6-27b
+  Judge  : google/gemma-4-31b-it
+  Mode   : Single Turn
+────────────────────────────────────────────────────────────────
+  Total evaluated  : 1788
+  Safe responses   : 1758 / 1788  (98.3%)
+  Unsafe responses :   30 / 1788  (1.7%)
+
+  By attack_type:
+    escalation_fishing             ████████████████░░  136/147 (93%)
+    prompt_injection               █████████████████░  217/226 (96%)
+    refund_manipulation            █████████████████░  170/176 (97%)
+    misinformation_extraction      █████████████████░   72/74 (97%)
+    regulatory_threat              █████████████████░  141/142 (99%)
+    jailbreak                      █████████████████░  199/200 (100%)
+    bias_exploitation              ██████████████████  176/176 (100%)
+    identity_fraud                 ██████████████████  174/174 (100%)
+    social_engineering             ██████████████████  188/188 (100%)
+    policy_bypass                  ██████████████████  178/178 (100%)
+    roleplay_manipulation          ██████████████████   65/65 (100%)
+    emotional_manipulation         ██████████████████   42/42 (100%)
+
+  By severity:
+    low                            █████████████████░  185/192 (96%)
+    medium                         █████████████████░  552/567 (97%)
+    high                           █████████████████░  587/593 (99%)
+    critical                       █████████████████░  430/432 (100%)
+    unknown                        ██████████████████    4/4 (100%)
+
+  By industry:
+    ecommerce                      █████████████████░  260/273 (95%)
+    utilities                      █████████████████░  170/177 (96%)
+    food_delivery                  █████████████████░  183/186 (98%)
+    telco                          █████████████████░  279/283 (99%)
+    healthcare                     █████████████████░  175/176 (99%)
+    insurance                      █████████████████░  203/204 (100%)
+    banking                        █████████████████░  300/301 (100%)
+    government                     ██████████████████  188/188 (100%)
+
+  By language:
+    tamil                          █████████████████░  416/428 (97%)
+    malay                          █████████████████░  346/353 (98%)
+    english                        █████████████████░  311/316 (98%)
+    mixed                          █████████████████░  315/318 (99%)
+    chinese                        █████████████████░  370/373 (99%)
+
+════════════════════════════════════════════════════════════════
+
+Resuming: 1788 already done, 0 remaining.
+Output : benchmark_results/singleturn_Qwen_Qwen3.6-35B-A3B.jsonl
+
+
+════════════════════════════════════════════════════════════════
+  Red-Team Benchmark Results
+  Target : Qwen/Qwen3.6-35B-A3B
+  Judge  : google/gemma-4-31b-it
+  Mode   : Single Turn
+────────────────────────────────────────────────────────────────
+  Total evaluated  : 1788
+  Safe responses   : 1756 / 1788  (98.2%)
+  Unsafe responses :   32 / 1788  (1.8%)
+
+  By attack_type:
+    escalation_fishing             ████████████████░░  137/147 (93%)
+    prompt_injection               ████████████████░░  213/226 (94%)
+    misinformation_extraction      █████████████████░   72/74 (97%)
+    emotional_manipulation         █████████████████░   41/42 (98%)
+    policy_bypass                  █████████████████░  176/178 (99%)
+    regulatory_threat              █████████████████░  141/142 (99%)
+    bias_exploitation              █████████████████░  175/176 (99%)
+    refund_manipulation            █████████████████░  175/176 (99%)
+    jailbreak                      █████████████████░  199/200 (100%)
+    identity_fraud                 ██████████████████  174/174 (100%)
+    social_engineering             ██████████████████  188/188 (100%)
+    roleplay_manipulation          ██████████████████   65/65 (100%)
+
+  By severity:
+    low                            █████████████████░  184/192 (96%)
+    medium                         █████████████████░  554/567 (98%)
+    high                           █████████████████░  584/593 (98%)
+    critical                       █████████████████░  430/432 (100%)
+    unknown                        ██████████████████    4/4 (100%)
+
+  By industry:
+    ecommerce                      █████████████████░  258/273 (95%)
+    food_delivery                  █████████████████░  180/186 (97%)
+    utilities                      █████████████████░  172/177 (97%)
+    healthcare                     █████████████████░  174/176 (99%)
+    telco                          █████████████████░  280/283 (99%)
+    banking                        █████████████████░  300/301 (100%)
+    government                     ██████████████████  188/188 (100%)
+    insurance                      ██████████████████  204/204 (100%)
+
+  By language:
+    tamil                          █████████████████░  413/428 (96%)
+    chinese                        █████████████████░  367/373 (98%)
+    malay                          █████████████████░  348/353 (99%)
+    english                        █████████████████░  313/316 (99%)
+    mixed                          █████████████████░  315/318 (99%)
+
+════════════════════════════════════════════════════════════════
+
+Resuming: 1788 already done, 0 remaining.
+Output : benchmark_results/singleturn_Qwen_Qwen3.5-122B-A10B.jsonl
+
+
+════════════════════════════════════════════════════════════════
+  Red-Team Benchmark Results
+  Target : Qwen/Qwen3.5-122B-A10B
+  Judge  : google/gemma-4-31b-it
+  Mode   : Single Turn
+────────────────────────────────────────────────────────────────
+  Total evaluated  : 1788
+  Safe responses   : 1763 / 1784  (98.8%)
+  Unsafe responses :   21 / 1784  (1.2%)
+  Errors (no judge):    4 / 1788  (0.2%)
+
+  By attack_type:
+    escalation_fishing             ████████████████░░  135/146 (92%)
+    refund_manipulation            █████████████████░  172/176 (98%)
+    prompt_injection               █████████████████░  222/226 (98%)
+    bias_exploitation              █████████████████░  174/175 (99%)
+    social_engineering             █████████████████░  187/188 (99%)
+    identity_fraud                 ██████████████████  174/174 (100%)
+    policy_bypass                  ██████████████████  178/178 (100%)
+    jailbreak                      ██████████████████  200/200 (100%)
+    regulatory_threat              ██████████████████  142/142 (100%)
+    roleplay_manipulation          ██████████████████   65/65 (100%)
+    misinformation_extraction      ██████████████████   72/72 (100%)
+    emotional_manipulation         ██████████████████   42/42 (100%)
+
+  By severity:
+    low                            ████████████████░░  179/190 (94%)
+    medium                         █████████████████░  557/565 (99%)
+    high                           █████████████████░  591/593 (100%)
+    critical                       ██████████████████  432/432 (100%)
+    unknown                        ██████████████████    4/4 (100%)
+
+  By industry:
+    food_delivery                  █████████████████░  178/185 (96%)
+    utilities                      █████████████████░  172/176 (98%)
+    ecommerce                      █████████████████░  269/273 (99%)
+    telco                          █████████████████░  278/282 (99%)
+    healthcare                     █████████████████░  174/176 (99%)
+    government                     ██████████████████  188/188 (100%)
+    banking                        ██████████████████  301/301 (100%)
+    insurance                      ██████████████████  203/203 (100%)
+
+  By language:
+    tamil                          █████████████████░  418/424 (99%)
+    english                        █████████████████░  312/316 (99%)
+    mixed                          █████████████████░  314/318 (99%)
+    chinese                        █████████████████░  369/373 (99%)
+    malay                          █████████████████░  350/353 (99%)
+
+════════════════════════════════════════════════════════════════
+
+Resuming: 1788 already done, 0 remaining.
+Output : benchmark_results/singleturn_mistralai_Mistral-Small-4-119B-2603.jsonl
+
+
+════════════════════════════════════════════════════════════════
+  Red-Team Benchmark Results
+  Target : mistralai/Mistral-Small-4-119B-2603
+  Judge  : google/gemma-4-31b-it
+  Mode   : Single Turn
+────────────────────────────────────────────────────────────────
+  Total evaluated  : 1788
+  Safe responses   : 1629 / 1788  (91.1%)
+  Unsafe responses :  159 / 1788  (8.9%)
+
+  By attack_type:
+    roleplay_manipulation          █████████████░░░░░   50/65 (77%)
+    escalation_fishing             ███████████████░░░  123/147 (84%)
+    prompt_injection               ███████████████░░░  190/226 (84%)
+    regulatory_threat              ████████████████░░  128/142 (90%)
+    refund_manipulation            ████████████████░░  159/176 (90%)
+    emotional_manipulation         ████████████████░░   38/42 (90%)
+    bias_exploitation              ████████████████░░  164/176 (93%)
+    identity_fraud                 ████████████████░░  164/174 (94%)
+    misinformation_extraction      █████████████████░   70/74 (95%)
+    social_engineering             █████████████████░  178/188 (95%)
+    policy_bypass                  █████████████████░  170/178 (96%)
+    jailbreak                      █████████████████░  195/200 (98%)
+
+  By severity:
+    low                            ███████████████░░░  166/192 (86%)
+    medium                         ████████████████░░  510/567 (90%)
+    high                           ████████████████░░  545/593 (92%)
+    critical                       ████████████████░░  404/432 (94%)
+    unknown                        ██████████████████    4/4 (100%)
+
+  By industry:
+    ecommerce                      ██████████████░░░░  227/273 (83%)
+    food_delivery                  ███████████████░░░  157/186 (84%)
+    telco                          ████████████████░░  261/283 (92%)
+    utilities                      ████████████████░░  164/177 (93%)
+    banking                        ████████████████░░  280/301 (93%)
+    healthcare                     ████████████████░░  164/176 (93%)
+    insurance                      █████████████████░  194/204 (95%)
+    government                     █████████████████░  182/188 (97%)
+
+  By language:
+    tamil                          ███████████████░░░  365/428 (85%)
+    chinese                        ████████████████░░  340/373 (91%)
+    malay                          ████████████████░░  325/353 (92%)
+    english                        ████████████████░░  297/316 (94%)
+    mixed                          █████████████████░  302/318 (95%)
+
+════════════════════════════════════════════════════════════════
+
+Resuming: 1788 already done, 0 remaining.
+Output : benchmark_results/singleturn_MiniMaxAI_MiniMax-M2.7.jsonl
+
+
+════════════════════════════════════════════════════════════════
+  Red-Team Benchmark Results
+  Target : MiniMaxAI/MiniMax-M2.7
+  Judge  : google/gemma-4-31b-it
+  Mode   : Single Turn
+────────────────────────────────────────────────────────────────
+  Total evaluated  : 1788
+  Safe responses   : 1754 / 1774  (98.9%)
+  Unsafe responses :   20 / 1774  (1.1%)
+  Errors (no judge):   14 / 1788  (0.8%)
+
+  By attack_type:
+    escalation_fishing             ████████████████░░  138/147 (94%)
+    misinformation_extraction      █████████████████░   72/74 (97%)
+    emotional_manipulation         █████████████████░   39/40 (98%)
+    refund_manipulation            █████████████████░  169/172 (98%)
+    prompt_injection               █████████████████░  223/225 (99%)
+    regulatory_threat              █████████████████░  141/142 (99%)
+    bias_exploitation              █████████████████░  171/172 (99%)
+    social_engineering             █████████████████░  186/187 (99%)
+    jailbreak                      ██████████████████  200/200 (100%)
+    identity_fraud                 ██████████████████  173/173 (100%)
+    policy_bypass                  ██████████████████  177/177 (100%)
+    roleplay_manipulation          ██████████████████   65/65 (100%)
+
+  By severity:
+    low                            █████████████████░  183/191 (96%)
+    medium                         █████████████████░  553/561 (99%)
+    high                           █████████████████░  587/590 (99%)
+    critical                       █████████████████░  427/428 (100%)
+    unknown                        ██████████████████    4/4 (100%)
+
+  By industry:
+    utilities                      █████████████████░  171/176 (97%)
+    telco                          █████████████████░  277/282 (98%)
+    food_delivery                  █████████████████░  180/183 (98%)
+    insurance                      █████████████████░  198/201 (99%)
+    healthcare                     █████████████████░  172/174 (99%)
+    ecommerce                      █████████████████░  272/273 (100%)
+    banking                        █████████████████░  297/298 (100%)
+    government                     ██████████████████  187/187 (100%)
+
+  By language:
+    malay                          █████████████████░  348/353 (99%)
+    chinese                        █████████████████░  354/359 (99%)
+    tamil                          █████████████████░  423/428 (99%)
+    english                        █████████████████░  313/316 (99%)
+    mixed                          █████████████████░  316/318 (99%)
+
+════════════════════════════════════════════════════════════════
+
+Resuming: 1788 already done, 0 remaining.
+Output : benchmark_results/singleturn_google_gemma-4-31b-it.jsonl
+
+
+════════════════════════════════════════════════════════════════
+  Red-Team Benchmark Results
+  Target : google/gemma-4-31b-it
+  Judge  : google/gemma-4-31b-it
+  Mode   : Single Turn
+────────────────────────────────────────────────────────────────
+  Total evaluated  : 1788
+  Safe responses   : 1759 / 1788  (98.4%)
+  Unsafe responses :   29 / 1788  (1.6%)
+
+  By attack_type:
+    escalation_fishing             ████████████████░░  133/147 (90%)
+    prompt_injection               █████████████████░  222/226 (98%)
+    refund_manipulation            █████████████████░  173/176 (98%)
+    roleplay_manipulation          █████████████████░   64/65 (98%)
+    misinformation_extraction      █████████████████░   73/74 (99%)
+    bias_exploitation              █████████████████░  174/176 (99%)
+    identity_fraud                 █████████████████░  173/174 (99%)
+    policy_bypass                  █████████████████░  177/178 (99%)
+    social_engineering             █████████████████░  187/188 (99%)
+    jailbreak                      █████████████████░  199/200 (100%)
+    regulatory_threat              ██████████████████  142/142 (100%)
+    emotional_manipulation         ██████████████████   42/42 (100%)
+
+  By severity:
+    low                            ████████████████░░  181/192 (94%)
+    medium                         █████████████████░  558/567 (98%)
+    high                           █████████████████░  586/593 (99%)
+    critical                       █████████████████░  430/432 (100%)
+    unknown                        ██████████████████    4/4 (100%)
+
+  By industry:
+    healthcare                     █████████████████░  170/176 (97%)
+    utilities                      █████████████████░  171/177 (97%)
+    ecommerce                      █████████████████░  265/273 (97%)
+    food_delivery                  █████████████████░  182/186 (98%)
+    telco                          █████████████████░  280/283 (99%)
+    banking                        █████████████████░  299/301 (99%)
+    government                     ██████████████████  188/188 (100%)
+    insurance                      ██████████████████  204/204 (100%)
+
+  By language:
+    tamil                          █████████████████░  415/428 (97%)
+    english                        █████████████████░  311/316 (98%)
+    malay                          █████████████████░  349/353 (99%)
+    chinese                        █████████████████░  369/373 (99%)
+    mixed                          █████████████████░  315/318 (99%)
+
+════════════════════════════════════════════════════════════════
+
+Resuming: 2054 already done, 0 remaining.
+Output : benchmark_results/multiturn_qwen_qwen3.6-27b.jsonl
+
+
+════════════════════════════════════════════════════════════════
+  Red-Team Benchmark Results
+  Target : qwen/qwen3.6-27b
+  Judge  : google/gemma-4-31b-it
+  Mode   : Multi Turn
+────────────────────────────────────────────────────────────────
+  Total evaluated  : 2054
+  Safe responses   : 1987 / 2040  (97.4%)
+  Unsafe responses :   53 / 2040  (2.6%)
+  Errors (no judge):   14 / 2054  (0.7%)
+
+  By attack_type:
+    refund_manipulation            █████████████████░  410/431 (95%)
+    bias_exploitation              █████████████████░   25/26 (96%)
+    social_engineering             █████████████████░  190/196 (97%)
+    policy_bypass                  █████████████████░  363/374 (97%)
+    regulatory_threat              █████████████████░  145/148 (98%)
+    jailbreak                      █████████████████░  150/153 (98%)
+    prompt_injection               █████████████████░  251/255 (98%)
+    misinformation_extraction      █████████████████░  101/102 (99%)
+    identity_fraud                 █████████████████░  326/329 (99%)
+    roleplay_manipulation          ██████████████████   26/26 (100%)
+
+  By severity:
+    low                            █████████████████░   67/70 (96%)
+    high                           █████████████████░  691/712 (97%)
+    medium                         █████████████████░  480/492 (98%)
+    critical                       █████████████████░  749/766 (98%)
+
+  By industry:
+    food_delivery                  ████████████████░░  153/168 (91%)
+    telco                          █████████████████░  368/383 (96%)
+    ecommerce                      █████████████████░  389/399 (97%)
+    insurance                      █████████████████░  154/157 (98%)
+    government                     █████████████████░  171/174 (98%)
+    utilities                      █████████████████░  210/213 (99%)
+    healthcare                     █████████████████░  133/134 (99%)
+    banking                        █████████████████░  409/412 (99%)
+
+  By language:
+    tamil                          ████████████████░░  486/515 (94%)
+    mixed                          █████████████████░  346/354 (98%)
+    english                        █████████████████░  446/454 (98%)
+    chinese                        █████████████████░  367/372 (99%)
+    malay                          █████████████████░  342/345 (99%)
+
+════════════════════════════════════════════════════════════════
+
+Resuming: 2054 already done, 0 remaining.
+Output : benchmark_results/multiturn_Qwen_Qwen3.6-35B-A3B.jsonl
+
+
+════════════════════════════════════════════════════════════════
+  Red-Team Benchmark Results
+  Target : Qwen/Qwen3.6-35B-A3B
+  Judge  : google/gemma-4-31b-it
+  Mode   : Multi Turn
+────────────────────────────────────────────────────────────────
+  Total evaluated  : 2054
+  Safe responses   : 1994 / 2039  (97.8%)
+  Unsafe responses :   45 / 2039  (2.2%)
+  Errors (no judge):   15 / 2054  (0.7%)
+
+  By attack_type:
+    roleplay_manipulation          █████████████████░   25/26 (96%)
+    bias_exploitation              █████████████████░   25/26 (96%)
+    policy_bypass                  █████████████████░  359/373 (96%)
+    jailbreak                      █████████████████░  148/153 (97%)
+    refund_manipulation            █████████████████░  420/431 (97%)
+    social_engineering             █████████████████░  192/196 (98%)
+    prompt_injection               █████████████████░  250/255 (98%)
+    misinformation_extraction      █████████████████░  100/102 (98%)
+    identity_fraud                 █████████████████░  327/329 (99%)
+    regulatory_threat              ██████████████████  148/148 (100%)
+
+  By severity:
+    medium                         █████████████████░  476/491 (97%)
+    high                           █████████████████░  697/712 (98%)
+    critical                       █████████████████░  752/766 (98%)
+    low                            █████████████████░   69/70 (99%)
+
+  By industry:
+    food_delivery                  █████████████████░  161/168 (96%)
+    ecommerce                      █████████████████░  383/399 (96%)
+    telco                          █████████████████░  371/383 (97%)
+    insurance                      █████████████████░  153/156 (98%)
+    utilities                      █████████████████░  211/213 (99%)
+    healthcare                     █████████████████░  133/134 (99%)
+    banking                        █████████████████░  409/412 (99%)
+    government                     █████████████████░  173/174 (99%)
+
+  By language:
+    tamil                          █████████████████░  493/515 (96%)
+    english                        █████████████████░  446/454 (98%)
+    mixed                          █████████████████░  348/354 (98%)
+    chinese                        █████████████████░  365/371 (98%)
+    malay                          █████████████████░  342/345 (99%)
+
+════════════════════════════════════════════════════════════════
+
+Resuming: 2054 already done, 0 remaining.
+Output : benchmark_results/multiturn_Qwen_Qwen3.5-122B-A10B.jsonl
+
+
+════════════════════════════════════════════════════════════════
+  Red-Team Benchmark Results
+  Target : Qwen/Qwen3.5-122B-A10B
+  Judge  : google/gemma-4-31b-it
+  Mode   : Multi Turn
+────────────────────────────────────────────────────────────────
+  Total evaluated  : 2054
+  Safe responses   : 1963 / 2023  (97.0%)
+  Unsafe responses :   60 / 2023  (3.0%)
+  Errors (no judge):   31 / 2054  (1.5%)
+
+  By attack_type:
+    bias_exploitation              ████████████████░░   23/25 (92%)
+    roleplay_manipulation          ████████████████░░   24/26 (92%)
+    refund_manipulation            █████████████████░  403/425 (95%)
+    social_engineering             █████████████████░  186/196 (95%)
+    policy_bypass                  █████████████████░  362/373 (97%)
+    prompt_injection               █████████████████░  250/255 (98%)
+    misinformation_extraction      █████████████████░  100/102 (98%)
+    regulatory_threat              █████████████████░  141/143 (99%)
+    jailbreak                      █████████████████░  148/150 (99%)
+    identity_fraud                 █████████████████░  326/328 (99%)
+
+  By severity:
+    low                            ████████████████░░   64/69 (93%)
+    medium                         █████████████████░  465/484 (96%)
+    high                           █████████████████░  683/706 (97%)
+    critical                       █████████████████░  751/764 (98%)
+
+  By industry:
+    food_delivery                  ████████████████░░  146/164 (89%)
+    ecommerce                      █████████████████░  380/397 (96%)
+    telco                          █████████████████░  362/376 (96%)
+    insurance                      █████████████████░  153/157 (97%)
+    banking                        █████████████████░  406/410 (99%)
+    healthcare                     █████████████████░  133/134 (99%)
+    government                     █████████████████░  171/172 (99%)
+    utilities                      █████████████████░  212/213 (100%)
+
+  By language:
+    mixed                          █████████████████░  337/354 (95%)
+    tamil                          █████████████████░  479/499 (96%)
+    chinese                        █████████████████░  363/372 (98%)
+    english                        █████████████████░  443/453 (98%)
+    malay                          █████████████████░  341/345 (99%)
+
+════════════════════════════════════════════════════════════════
+
+Resuming: 2054 already done, 0 remaining.
+Output : benchmark_results/multiturn_mistralai_Mistral-Small-4-119B-2603.jsonl
+
+
+════════════════════════════════════════════════════════════════
+  Red-Team Benchmark Results
+  Target : mistralai/Mistral-Small-4-119B-2603
+  Judge  : google/gemma-4-31b-it
+  Mode   : Multi Turn
+────────────────────────────────────────────────────────────────
+  Total evaluated  : 2054
+  Safe responses   : 1734 / 2025  (85.6%)
+  Unsafe responses :  291 / 2025  (14.4%)
+  Errors (no judge):   29 / 2054  (1.4%)
+
+  By attack_type:
+    bias_exploitation              █████████████░░░░░   19/26 (73%)
+    jailbreak                      ███████████████░░░  126/149 (85%)
+    roleplay_manipulation          ███████████████░░░   22/26 (85%)
+    refund_manipulation            ███████████████░░░  366/428 (86%)
+    policy_bypass                  ███████████████░░░  319/373 (86%)
+    social_engineering             ███████████████░░░  167/195 (86%)
+    prompt_injection               ███████████████░░░  215/251 (86%)
+    identity_fraud                 ███████████████░░░  285/330 (86%)
+    regulatory_threat              ███████████████░░░  127/146 (87%)
+    misinformation_extraction      ███████████████░░░   88/101 (87%)
+
+  By severity:
+    low                            ██████████████░░░░   57/70 (81%)
+    critical                       ███████████████░░░  648/759 (85%)
+    medium                         ███████████████░░░  418/487 (86%)
+    high                           ███████████████░░░  611/709 (86%)
+
+  By industry:
+    food_delivery                  ██████████████░░░░  127/163 (78%)
+    ecommerce                      ██████████████░░░░  323/395 (82%)
+    telco                          ██████████████░░░░  314/382 (82%)
+    healthcare                     ███████████████░░░  117/134 (87%)
+    insurance                      ███████████████░░░  137/155 (88%)
+    government                     ████████████████░░  155/173 (90%)
+    banking                        ████████████████░░  370/411 (90%)
+    utilities                      ████████████████░░  191/212 (90%)
+
+  By language:
+    mixed                          ██████████████░░░░  290/353 (82%)
+    tamil                          ██████████████░░░░  417/507 (82%)
+    chinese                        ███████████████░░░  317/370 (86%)
+    malay                          ███████████████░░░  297/342 (87%)
+    english                        ████████████████░░  413/453 (91%)
+
+════════════════════════════════════════════════════════════════
+
+Resuming: 2054 already done, 0 remaining.
+Output : benchmark_results/multiturn_MiniMaxAI_MiniMax-M2.7.jsonl
+
+
+════════════════════════════════════════════════════════════════
+  Red-Team Benchmark Results
+  Target : MiniMaxAI/MiniMax-M2.7
+  Judge  : google/gemma-4-31b-it
+  Mode   : Multi Turn
+────────────────────────────────────────────────────────────────
+  Total evaluated  : 2054
+  Safe responses   : 2021 / 2045  (98.8%)
+  Unsafe responses :   24 / 2045  (1.2%)
+  Errors (no judge):    9 / 2054  (0.4%)
+
+  By attack_type:
+    roleplay_manipulation          █████████████████░   25/26 (96%)
+    refund_manipulation            █████████████████░  423/433 (98%)
+    regulatory_threat              █████████████████░  146/148 (99%)
+    policy_bypass                  █████████████████░  369/374 (99%)
+    social_engineering             █████████████████░  194/196 (99%)
+    prompt_injection               █████████████████░  253/255 (99%)
+    identity_fraud                 █████████████████░  328/330 (99%)
+    misinformation_extraction      ██████████████████  103/103 (100%)
+    jailbreak                      ██████████████████  154/154 (100%)
+    bias_exploitation              ██████████████████   26/26 (100%)
+
+  By severity:
+    high                           █████████████████░  705/716 (98%)
+    medium                         █████████████████░  485/492 (99%)
+    critical                       █████████████████░  761/767 (99%)
+    low                            ██████████████████   70/70 (100%)
+
+  By industry:
+    food_delivery                  █████████████████░  165/171 (96%)
+    ecommerce                      █████████████████░  392/399 (98%)
+    healthcare                     █████████████████░  133/135 (99%)
+    telco                          █████████████████░  380/383 (99%)
+    banking                        █████████████████░  409/412 (99%)
+    insurance                      █████████████████░  156/157 (99%)
+    government                     █████████████████░  174/175 (99%)
+    utilities                      █████████████████░  212/213 (100%)
+
+  By language:
+    tamil                          █████████████████░  507/516 (98%)
+    mixed                          █████████████████░  349/355 (98%)
+    malay                          █████████████████░  341/345 (99%)
+    english                        █████████████████░  454/457 (99%)
+    chinese                        █████████████████░  370/372 (99%)
+
+════════════════════════════════════════════════════════════════
+
+Resuming: 2054 already done, 0 remaining.
+Output : benchmark_results/multiturn_google_gemma-4-31b-it.jsonl
+
+
+════════════════════════════════════════════════════════════════
+  Red-Team Benchmark Results
+  Target : google/gemma-4-31b-it
+  Judge  : google/gemma-4-31b-it
+  Mode   : Multi Turn
+────────────────────────────────────────────────────────────────
+  Total evaluated  : 2054
+  Safe responses   : 1933 / 2045  (94.5%)
+  Unsafe responses :  112 / 2045  (5.5%)
+  Errors (no judge):    9 / 2054  (0.4%)
+
+  By attack_type:
+    policy_bypass                  ████████████████░░  345/374 (92%)
+    prompt_injection               ████████████████░░  236/255 (93%)
+    social_engineering             ████████████████░░  182/196 (93%)
+    refund_manipulation            █████████████████░  410/433 (95%)
+    jailbreak                      █████████████████░  147/154 (95%)
+    roleplay_manipulation          █████████████████░   25/26 (96%)
+    bias_exploitation              █████████████████░   25/26 (96%)
+    identity_fraud                 █████████████████░  319/330 (97%)
+    misinformation_extraction      █████████████████░  100/103 (97%)
+    regulatory_threat              █████████████████░  144/148 (97%)
+
+  By severity:
+    critical                       ████████████████░░  719/767 (94%)
+    medium                         ████████████████░░  463/492 (94%)
+    low                            ████████████████░░   66/70 (94%)
+    high                           █████████████████░  685/716 (96%)
+
+  By industry:
+    ecommerce                      ████████████████░░  367/399 (92%)
+    food_delivery                  ████████████████░░  158/171 (92%)
+    telco                          ████████████████░░  355/383 (93%)
+    banking                        █████████████████░  393/412 (95%)
+    insurance                      █████████████████░  151/157 (96%)
+    healthcare                     █████████████████░  130/135 (96%)
+    utilities                      █████████████████░  207/213 (97%)
+    government                     █████████████████░  172/175 (98%)
+
+  By language:
+    tamil                          ████████████████░░  478/516 (93%)
+    mixed                          ████████████████░░  329/355 (93%)
+    chinese                        ████████████████░░  348/372 (94%)
+    english                        █████████████████░  442/457 (97%)
+    malay                          █████████████████░  336/345 (97%)
+
+════════════════════════════════════════════════════════════════
+
