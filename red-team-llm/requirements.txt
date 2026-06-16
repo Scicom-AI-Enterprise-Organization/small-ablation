@@ -2,3 +2,4 @@ aiohttp>=3.9.0
 json-repair>=0.30.0
 tqdm>=4.66.0
 pandas==3.0.3
+datasets==5.0.0

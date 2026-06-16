@@ -274,14 +274,16 @@ All 6 models benchmarked on the same datasets, judged by `google/gemma-4-31b-it`
 
 | Model | Safe | Unsafe | Safe Rate |
 |---|---|---|---|
-| **MiniMaxAI/MiniMax-M2.7** | 1754/1774 | 20 | **98.9%**  |
+| **MiniMaxAI/MiniMax-M2.7** | 1754/1774 | 20 | **98.9%** |
 | Qwen/Qwen3.5-122B-A10B | 1763/1784 | 21 | 98.8% |
 | google/gemma-4-31b-it | 1759/1788 | 29 | 98.4% |
 | qwen/qwen3.6-27b | 1758/1788 | 30 | 98.3% |
 | Qwen/Qwen3.6-35B-A3B | 1756/1788 | 32 | 98.2% |
-| mistralai/Mistral-Small-4-119B-2603 | 1629/1788 | 159 | 91.1%  |
+| Qwen/Qwen3.5-397B-A17B | 1753/1785 | 32 | 98.2% |
+| mistralai/Mistral-Small-4-119B-2603 | 1629/1788 | 159 | 91.1% |
+| zai-org/GLM-4.7-Flash | 1607/1777 | 170 | 90.4% |
 
-Weakest attack types: `escalation_fishing` (93%), `prompt_injection` (94–96%).
+Weakest attack types: `escalation_fishing` (73–93%), `prompt_injection` (81–98%).
 
 **Multi-Turn** (2,054 entries)
 
@@ -291,9 +293,11 @@ Weakest attack types: `escalation_fishing` (93%), `prompt_injection` (94–96%).
 | Qwen/Qwen3.6-35B-A3B | 1994/2039 | 45 | 97.8% |
 | qwen/qwen3.6-27b | 1987/2040 | 53 | 97.4% |
 | Qwen/Qwen3.5-122B-A10B | 1963/2023 | 60 | 97.0% |
+| Qwen/Qwen3.5-397B-A17B | 1971/2035 | 64 | 96.9% |
 | google/gemma-4-31b-it | 1933/2045 | 112 | 94.5% |
-| mistralai/Mistral-Small-4-119B-2603 | 1734/2025 | 291 | 85.6%  |
+| zai-org/GLM-4.7-Flash | 1781/2039 | 258 | 87.3% |
+| mistralai/Mistral-Small-4-119B-2603 | 1734/2025 | 291 | 85.6% |
 
 Multi-turn attacks are harder — all models score lower than single-turn. Weakest industry: `food_delivery` and `ecommerce`. Weakest language: `tamil`.
 
-**Key finding:** `MiniMaxAI/MiniMax-M2.7` is the safest model on both modes. `mistralai/Mistral-Small-4-119B-2603` shows a significant gap, failing 14.4% of multi-turn attacks.
+**Key finding:** `MiniMaxAI/MiniMax-M2.7` is the safest model on both modes. `zai-org/GLM-4.7-Flash` and `mistralai/Mistral-Small-4-119B-2603` show the largest gaps, with GLM-4.7-Flash failing 9.6% of single-turn and 12.7% of multi-turn attacks — most vulnerable on `escalation_fishing` (73%) and `roleplay_manipulation` (58% multi-turn).
