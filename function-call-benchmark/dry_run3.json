@@ -1,0 +1,173 @@
+{
+  "conversation_id": "myl-dryrun-0003",
+  "workflow_name": "prepaid_usage_to_payment",
+  "domain": "telco_billing/prepaid_charging",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hi, saya nak check balance prepaid saya boleh? Number 60123456789. Semalam saya guna data banyak betul, layan TikTok dengan main Mobile Legends, takut data dah habis. Boleh tolong tengok sekali bundle aktif dengan status barring — saya ada lewat bayar minggu lepas, risau line saya kena potong."
+    },
+    {
+      "role": "assistant",
+      "content": "Selamat pagi Encik, terima kasih kerana menghubungi khidmat pelanggan. Saya akan semak konteks prepaid Encik sekarang, termasuk baki, bundle aktif dan status barring. Mohon tunggu sebentar.",
+      "tool_calls": [
+        {
+          "id": "call-my-001",
+          "type": "function",
+          "function": {
+            "name": "get_subscriber_context",
+            "arguments": "{\"subscriber_id\": \"60123456789\", \"include\": [\"balances\", \"bundles\", \"usage_counters\", \"barring_status\"]}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call-my-001",
+      "name": "get_subscriber_context",
+      "content": "{\"subscriber_id\": \"60123456789\", \"account_id\": \"acc-my-77821\", \"status\": \"active\", \"as_of_time\": \"2026-05-20T10:14:02+08:00\", \"balances\": [{\"balance_type\": \"main\", \"available\": {\"amount\": 3.50, \"currency\": \"MYR\"}, \"reserved\": {\"amount\": 0.00, \"currency\": \"MYR\"}, \"expiry\": \"2026-08-15T23:59:59+08:00\"}, {\"balance_type\": \"data\", \"available\": {\"amount\": 215, \"unit\": \"MB\"}, \"reserved\": {\"amount\": 0, \"unit\": \"MB\"}, \"expiry\": \"2026-05-22T23:59:59+08:00\"}, {\"balance_type\": \"voice\", \"available\": {\"amount\": 14, \"unit\": \"minutes\"}, \"expiry\": \"2026-05-22T23:59:59+08:00\"}, {\"balance_type\": \"bonus\", \"available\": {\"amount\": 0, \"unit\": \"MB\"}}], \"bundles\": [], \"usage_counters\": {\"data_used_today_mb\": 1842, \"voice_minutes_used_today\": 6, \"sms_sent_today\": 2}, \"barring_status\": {\"barred\": false, \"reasons\": [], \"last_evaluated\": \"2026-05-20T10:00:00+08:00\"}}"
+    },
+    {
+      "role": "assistant",
+      "content": "Terima kasih atas kesabaran Encik. Berikut ringkasan akaun Encik setakat pukul 10:14 pagi:\n\n- **Baki utama:** RM 3.50\n- **Baki data:** 215 MB (tamat tempoh 22 Mei 2026)\n- **Baki panggilan:** 14 minit\n- **SMS / bonus:** tiada\n- **Bundle aktif:** tiada bundle sedang aktif\n- **Status barring:** tidak dibar — talian Encik **tidak terjejas** oleh isu pembayaran lewat minggu lepas. Encik boleh bertenang berkenaan perkara tersebut.\n- **Penggunaan hari ini:** 1.84 GB data telah digunakan\n\nMemandangkan baki data agak rendah dan tiada bundle aktif, adakah Encik ingin membuat tambah nilai terlebih dahulu, atau Encik mahu saya paparkan senarai bundle yang sesuai? Saya cadangkan tambah nilai dahulu supaya pilihan bundle lebih luas."
+    },
+    {
+      "role": "user",
+      "content": "Okay, I'll top up RM 50 first. Use Touch n Go eWallet please. And can you make sure the official receipt is issued? I need it to claim from my company allowance."
+    },
+    {
+      "role": "assistant",
+      "content": "Certainly, Sir. I will proceed with an RM 50 top-up via Touch n Go eWallet, and an official receipt will be issued for your reimbursement claim. Please hold on for a moment while I process the transaction.",
+      "tool_calls": [
+        {
+          "id": "call-my-002",
+          "type": "function",
+          "function": {
+            "name": "apply_prepaid_topup",
+            "arguments": "{\"subscriber_id\": \"60123456789\", \"topup_source\": \"online_wallet\", \"topup_amount\": {\"value\": 50.00, \"currency\": \"MYR\"}, \"payment_instrument\": {\"instrument_type\": \"wallet_token\", \"wallet_provider\": \"touch_n_go\", \"token_reference\": \"tng-tkn-aa91f2-xx\"}, \"idempotency_key\": \"topup-60123456789-20260520-001\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call-my-002",
+      "name": "apply_prepaid_topup",
+      "content": "{\"payment_transaction_id\": \"txn-tng-99812-myr\", \"status\": \"success\", \"subscriber_id\": \"60123456789\", \"topup_source\": \"online_wallet\", \"wallet_provider\": \"touch_n_go\", \"topup_amount\": {\"value\": 50.00, \"currency\": \"MYR\"}, \"posted_at\": \"2026-05-20T10:16:48+08:00\", \"updated_balances\": [{\"balance_type\": \"main\", \"available\": {\"amount\": 53.50, \"currency\": \"MYR\"}, \"expiry\": \"2026-08-18T23:59:59+08:00\"}, {\"balance_type\": \"bonus\", \"available\": {\"amount\": 100, \"unit\": \"MB\"}, \"expiry\": \"2026-05-23T23:59:59+08:00\"}], \"bonus_triggered\": [{\"bonus_id\": \"bns-tng-100mb\", \"description\": \"100 MB bonus for eWallet top-up of RM 30 and above\", \"validity_hours\": 72}], \"receipt\": {\"receipt_id\": \"rcpt-myr-99812\", \"merchant\": \"PrepaidCo Malaysia Sdn Bhd\", \"gst_inclusive\": false, \"download_url\": \"https://receipts.prepaidco.my/r/rcpt-myr-99812.pdf\"}}"
+    },
+    {
+      "role": "assistant",
+      "content": "Your top-up has been processed successfully, Sir. Here are the details:\n\n- **Transaction ID:** `txn-tng-99812-myr`\n- **Posted at:** 20 May 2026, 10:16 AM (MYT)\n- **New main balance:** RM 53.50 (previously RM 3.50)\n- **Complimentary bonus:** 100 MB data, valid for 72 hours (until 23 May 2026)\n- **Official receipt:** [rcpt-myr-99812.pdf](https://receipts.prepaidco.my/r/rcpt-myr-99812.pdf) — issued under *PrepaidCo Malaysia Sdn Bhd* for your reimbursement claim.\n\nMay I proceed to show you suitable combo bundles for your usage?"
+    },
+    {
+      "role": "user",
+      "content": "Okay good. Sekarang boleh tunjuk combo bundle yang ada dalam range RM 30 sampai 40? Saya nak yang sesuai untuk streaming dengan main game, low ping punya. Vanakkam, mohon recommend yang official sahaja ya."
+    },
+    {
+      "role": "assistant",
+      "content": "Baik Encik, saya akan paparkan bundle rasmi yang layak untuk akaun Encik dalam julat harga RM 30 hingga RM 40, dengan fokus streaming dan permainan dalam talian. Mohon tunggu sebentar.",
+      "tool_calls": [
+        {
+          "id": "call-my-003",
+          "type": "function",
+          "function": {
+            "name": "list_available_bundles",
+            "arguments": "{\"subscriber_id\": \"60123456789\", \"bundle_type\": \"combo\", \"sort_by\": \"popularity\", \"segment_filters\": {\"customer_segment\": \"youth\", \"network_type\": \"4G\", \"location_zone\": \"MY-KL\"}, \"include_ineligible\": false}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call-my-003",
+      "name": "list_available_bundles",
+      "content": "{\"subscriber_id\": \"60123456789\", \"currency\": \"MYR\", \"bundles\": [{\"bundle_id\": \"bdl-combo-gamer30d\", \"name\": \"Combo Gamer + Streaming 30 Hari\", \"price\": {\"amount\": 35.00, \"currency\": \"MYR\"}, \"validity_days\": 30, \"benefits\": [{\"type\": \"data\", \"amount\": 30, \"unit\": \"GB\"}, {\"type\": \"data_unli_app\", \"apps\": [\"TikTok\", \"YouTube\", \"Mobile Legends\", \"PUBG Mobile\", \"Spotify\"]}, {\"type\": \"voice\", \"amount\": 200, \"unit\": \"minutes\", \"scope\": \"all_local\"}, {\"type\": \"sms\", \"amount\": 100, \"unit\": \"messages\"}], \"low_ping_gaming\": true, \"eligibility\": {\"eligible\": true}}, {\"bundle_id\": \"bdl-combo-fam40d\", \"name\": \"Family Combo 40 Hari\", \"price\": {\"amount\": 40.00, \"currency\": \"MYR\"}, \"validity_days\": 40, \"benefits\": [{\"type\": \"data\", \"amount\": 25, \"unit\": \"GB\"}, {\"type\": \"voice\", \"amount\": 300, \"unit\": \"minutes\"}, {\"type\": \"sms\", \"amount\": 200, \"unit\": \"messages\"}, {\"type\": \"shareable_data\", \"shareable\": true, \"max_share_lines\": 3}], \"low_ping_gaming\": false, \"eligibility\": {\"eligible\": true}}, {\"bundle_id\": \"bdl-combo-budget7d\", \"name\": \"Jimat Combo Mingguan\", \"price\": {\"amount\": 12.00, \"currency\": \"MYR\"}, \"validity_days\": 7, \"benefits\": [{\"type\": \"data\", \"amount\": 5, \"unit\": \"GB\"}, {\"type\": \"voice\", \"amount\": 30, \"unit\": \"minutes\"}], \"low_ping_gaming\": false, \"eligibility\": {\"eligible\": true}}], \"pagination\": {\"total_count\": 3, \"page\": 1, \"page_size\": 20}}"
+    },
+    {
+      "role": "assistant",
+      "content": "Berikut pilihan bundle combo yang layak untuk akaun Encik:\n\n| Bundle | Harga | Tempoh Sah | Data | Panggilan / SMS | Ciri Utama |\n|---|---|---|---|---|---|\n| **Combo Gamer + Streaming 30 Hari** | RM 35 | 30 hari | 30 GB + **tanpa had untuk TikTok, YouTube, Mobile Legends, PUBG Mobile, Spotify** | 200 minit + 100 SMS | **Mod permainan ping rendah** diaktifkan |\n| Family Combo 40 Hari | RM 40 | 40 hari | 25 GB (boleh dikongsi) | 300 minit + 200 SMS | Boleh dikongsi sehingga 3 talian |\n| Jimat Combo Mingguan | RM 12 | 7 hari | 5 GB | 30 minit | Pilihan jimat untuk tempoh pendek |\n\nBerdasarkan keperluan Encik (streaming dan permainan dalam talian), saya mencadangkan **Combo Gamer + Streaming 30 Hari pada harga RM 35** — bundle ini menyediakan akses tanpa had untuk semua aplikasi yang Encik sebutkan, serta sokongan ping rendah untuk Mobile Legends.\n\nAdakah Encik ingin meneruskan pembelian bundle tersebut?"
+    },
+    {
+      "role": "user",
+      "content": "Okay yang Combo Gamer + Streaming tu nampak sesuai. Saya nak beli, charge dari main balance. Lepas tu boleh re-check balance sekali, saya nak confirm semua dah ok sebelum tutup call ni."
+    },
+    {
+      "role": "assistant",
+      "content": "Baik Encik. Saya akan teruskan pembelian Combo Gamer + Streaming 30 Hari dengan caj dari baki utama, kemudian saya akan paparkan ringkasan baki terkini untuk pengesahan. Mohon tunggu sebentar.",
+      "tool_calls": [
+        {
+          "id": "call-my-004",
+          "type": "function",
+          "function": {
+            "name": "purchase_bundle",
+            "arguments": "{\"subscriber_id\": \"60123456789\", \"bundle_id\": \"bdl-combo-gamer30d\", \"charging_preference\": {\"primary_balance_type\": \"main\", \"fallback_balance_types\": [\"wallet\"], \"allow_partial_from_points\": false}, \"idempotency_key\": \"buy-60123456789-bdl-combo-gamer30d-20260520\"}"
+          }
+        },
+        {
+          "id": "call-my-005",
+          "type": "function",
+          "function": {
+            "name": "get_balance_summary",
+            "arguments": "{\"subscriber_id\": \"60123456789\", \"balance_types\": [\"main\", \"data\", \"voice\", \"sms\", \"bonus\"], \"include_expired\": false}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call-my-004",
+      "name": "purchase_bundle",
+      "content": "{\"bundle_instance_id\": \"bi-60123456789-gamer30d-99812\", \"bundle_id\": \"bdl-combo-gamer30d\", \"status\": \"active\", \"activated_at\": \"2026-05-20T10:18:33+08:00\", \"expires_at\": \"2026-06-19T23:59:59+08:00\", \"charge\": {\"amount\": 35.00, \"currency\": \"MYR\", \"charged_from\": [{\"balance_type\": \"main\", \"amount\": 35.00}]}, \"benefits_granted\": [{\"type\": \"data\", \"amount\": 30, \"unit\": \"GB\"}, {\"type\": \"data_unli_app\", \"apps\": [\"TikTok\", \"YouTube\", \"Mobile Legends\", \"PUBG Mobile\", \"Spotify\"]}, {\"type\": \"voice\", \"amount\": 200, \"unit\": \"minutes\"}, {\"type\": \"sms\", \"amount\": 100, \"unit\": \"messages\"}], \"balance_impact\": {\"main_before\": 53.50, \"main_after\": 18.50, \"currency\": \"MYR\"}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call-my-005",
+      "name": "get_balance_summary",
+      "content": "{\"subscriber_id\": \"60123456789\", \"as_of_time\": \"2026-05-20T10:18:35+08:00\", \"balances\": [{\"balance_type\": \"main\", \"available\": {\"amount\": 18.50, \"currency\": \"MYR\"}, \"reserved\": {\"amount\": 0.00, \"currency\": \"MYR\"}, \"expiry\": \"2026-08-18T23:59:59+08:00\"}, {\"balance_type\": \"data\", \"available\": {\"amount\": 30215, \"unit\": \"MB\"}, \"expiry\": \"2026-06-19T23:59:59+08:00\", \"notes\": \"Termasuk 30 GB bundle + 215 MB baki sedia ada\"}, {\"balance_type\": \"voice\", \"available\": {\"amount\": 214, \"unit\": \"minutes\"}, \"expiry\": \"2026-06-19T23:59:59+08:00\"}, {\"balance_type\": \"sms\", \"available\": {\"amount\": 100, \"unit\": \"messages\"}, \"expiry\": \"2026-06-19T23:59:59+08:00\"}, {\"balance_type\": \"bonus\", \"available\": {\"amount\": 100, \"unit\": \"MB\"}, \"expiry\": \"2026-05-23T23:59:59+08:00\"}]}"
+    },
+    {
+      "role": "assistant",
+      "content": "Pembelian telah berjaya, Encik. Berikut pengesahan terkini:\n\n**Bundle aktif**\n- Nama: **Combo Gamer + Streaming 30 Hari**\n- ID instans: `bi-60123456789-gamer30d-99812`\n- Diaktifkan: 20 Mei 2026, 10:18 pagi\n- Tamat: **19 Jun 2026, 11:59 malam**\n- Caj: RM 35.00 dari baki utama\n\n**Ringkasan baki terkini**\n| Jenis | Baki | Tamat Tempoh |\n|---|---|---|\n| Baki utama | **RM 18.50** | 18 Ogos 2026 |\n| Data | **30.21 GB** | 19 Jun 2026 |\n| Panggilan | **214 minit** | 19 Jun 2026 |\n| SMS | **100 mesej** | 19 Jun 2026 |\n| Bonus eWallet | 100 MB | **23 Mei 2026** (3 hari sahaja) |\n\nSila ambil maklum bonus 100 MB hanya sah sehingga 23 Mei. Untuk aplikasi TikTok, YouTube, Mobile Legends, PUBG Mobile dan Spotify, penggunaan adalah **tanpa had** dan tidak akan menjejaskan kuota 30 GB Encik.\n\nAdakah ada apa-apa lagi yang saya boleh bantu?"
+    },
+    {
+      "role": "user",
+      "content": "One more thing sebelum saya tutup. Boleh list transaksi 7 hari ke belakang, yang status success je. Abang saya cakap dia ada nampak satu charge pelik dalam app kami semalam, risau kena scam."
+    },
+    {
+      "role": "assistant",
+      "content": "Sudah tentu, Encik. Saya akan paparkan senarai transaksi berstatus berjaya untuk tempoh 13 Mei hingga 20 Mei 2026 supaya kita boleh semak bersama-sama. Mohon tunggu sebentar.",
+      "tool_calls": [
+        {
+          "id": "call-my-006",
+          "type": "function",
+          "function": {
+            "name": "list_payment_transactions",
+            "arguments": "{\"subscriber_id\": \"60123456789\", \"time_range\": {\"from\": \"2026-05-13T00:00:00+08:00\", \"to\": \"2026-05-20T23:59:59+08:00\"}, \"filters\": {\"statuses\": [\"success\"]}, \"pagination\": {\"page\": 1, \"page_size\": 20}, \"sort_by\": \"posted_at\", \"sort_order\": \"desc\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call-my-006",
+      "name": "list_payment_transactions",
+      "content": "{\"transactions\": [{\"payment_transaction_id\": \"txn-tng-99812-myr\", \"posted_at\": \"2026-05-20T10:16:48+08:00\", \"source\": \"online_wallet\", \"wallet_provider\": \"touch_n_go\", \"amount\": {\"value\": 50.00, \"currency\": \"MYR\"}, \"status\": \"success\", \"description\": \"Tambah nilai eWallet\"}, {\"payment_transaction_id\": \"txn-vch-44102-myr\", \"posted_at\": \"2026-05-17T19:42:11+08:00\", \"source\": \"voucher\", \"voucher_serial\": \"PV-10MY-44102\", \"amount\": {\"value\": 10.00, \"currency\": \"MYR\"}, \"status\": \"success\", \"description\": \"Tambah nilai voucher 7-Eleven\"}, {\"payment_transaction_id\": \"txn-prm-77001-myr\", \"posted_at\": \"2026-05-15T08:30:00+08:00\", \"source\": \"promotional\", \"campaign_id\": \"PROMO-RAYA-2026\", \"amount\": {\"value\": 5.00, \"currency\": \"MYR\"}, \"status\": \"success\", \"description\": \"Pulangan tunai Promo Raya\"}, {\"payment_transaction_id\": \"txn-cc-88123-myr\", \"posted_at\": \"2026-05-14T23:58:02+08:00\", \"source\": \"credit_card\", \"card_brand\": \"VISA\", \"masked_pan\": \"************4421\", \"amount\": {\"value\": 88.00, \"currency\": \"MYR\"}, \"status\": \"success\", \"description\": \"Tambah nilai kad kredit\", \"merchant_country\": \"SG\", \"risk_flags\": [\"cross_border\", \"unusual_amount\"]}], \"pagination\": {\"total_count\": 4, \"page\": 1, \"page_size\": 20, \"has_next_page\": false}}"
+    },
+    {
+      "role": "assistant",
+      "content": "Berikut senarai transaksi berjaya untuk akaun Encik dalam tempoh 7 hari yang lalu:\n\n| Tarikh & Masa | Sumber | Amaun | Catatan |\n|---|---|---|---|\n| 20 Mei, 10:16 pagi | Touch n Go eWallet | RM 50.00 | Tambah nilai sebentar tadi |\n| 17 Mei, 7:42 malam | Voucher 7-Eleven | RM 10.00 | Tambah nilai biasa |\n| 15 Mei, 8:30 pagi | Promo cashback | RM 5.00 | Pulangan tunai Promo Raya 2026 |\n| **14 Mei, 11:58 malam** | **Kad kredit VISA ****4421** | **RM 88.00** | ⚠️ Ditanda **rentas sempadan (Singapura)** dan **amaun luar biasa** |\n\nEncik, transaksi pada **14 Mei 2026, 11:58 malam** sebanyak **RM 88.00** menggunakan kad kredit VISA berakhir **4421** dari merchant di **Singapura** telah ditandakan oleh sistem keselamatan kami sebagai **cross-border** dan **unusual_amount**. Kemungkinan besar inilah transaksi yang abang Encik maksudkan.\n\nMohon Encik sahkan dua perkara:\n\n1. Adakah Encik memiliki atau pernah menggunakan kad VISA berakhir **4421** untuk tambah nilai talian ini?\n2. Adakah Encik mengakui transaksi RM 88.00 pada 14 Mei tersebut?\n\nSekiranya jawapan kepada mana-mana soalan di atas adalah **tidak**, saya akan teruskan dengan:\n- **Membalikkan transaksi** `txn-cc-88123-myr` melalui proses pertikaian rasmi, dan\n- **Mengaktifkan barring sementara** untuk tambah nilai melalui kad kredit pada akaun Encik supaya percubaan seterusnya disekat secara automatik.\n\nSila maklumkan pengesahan Encik dan saya akan teruskan dengan tindakan yang sesuai."
+    }
+  ],
+  "metadata": {
+    "num_turns": 6,
+    "language_style": "user code-switches naturally between bahasa malaysia, manglish dan sebutan tamil sopan (vanakkam); agent kekal formal panggilan 'Encik/Sir' dan mengikut bahasa utama pengguna",
+    "generated_at": "2026-05-20T10:25:00+08:00",
+    "turn_details": [
+      {"turn": 1, "intent": "Pelanggan minta semakan baki, bundle aktif dan status barring", "expected_functions": ["get_subscriber_context"], "complexity": "simple"},
+      {"turn": 2, "intent": "Pelanggan mahu tambah nilai RM 50 melalui Touch n Go eWallet dengan resit untuk tuntutan", "expected_functions": ["apply_prepaid_topup"], "complexity": "moderate"},
+      {"turn": 3, "intent": "Pelanggan mahu melihat senarai combo bundle dalam julat RM 30-40 untuk streaming dan gaming", "expected_functions": ["list_available_bundles"], "complexity": "moderate"},
+      {"turn": 4, "intent": "Pelanggan membeli Combo Gamer + Streaming dan minta pengesahan baki", "expected_functions": ["purchase_bundle", "get_balance_summary"], "complexity": "complex"},
+      {"turn": 5, "intent": "Pelanggan minta semakan transaksi 7 hari kerana abangnya nampak caj mencurigakan", "expected_functions": ["list_payment_transactions"], "complexity": "moderate"}
+    ]
+  }
+}

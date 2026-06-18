@@ -1,4 +1,4 @@
-# Function Call Benchmark
+# Function-Call-TaaS Benchmark
 
 **Dataset:** [Scicom-intl/Function-Call-TaaS](https://huggingface.co/datasets/Scicom-intl/Function-Call-TaaS)
 
