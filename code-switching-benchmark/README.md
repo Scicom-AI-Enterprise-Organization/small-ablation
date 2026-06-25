@@ -38,7 +38,7 @@ Results are saved to `results/<model-name>/` — `progress.jsonl` for per-sample
 
 ## Summary
 
-| Model | Overall | English | Chinese | Malay | Tamil |
+| Model | Overall | English | Chinese | Malay¹ | Tamil |
 |---|---|---|---|---|---|
 | Qwen/Qwen3.6-27B | **67.7%** | 92.8% | 15.8% | 56.7% | 98.6% |
 | mistralai/Mistral-Small-4-119B-2603 | 65.7% | 37.0% | 75.1% | 86.0% | 79.4% |
@@ -48,6 +48,29 @@ Results are saved to `results/<model-name>/` — `progress.jsonl` for per-sample
 | Qwen/Qwen3.5-122B-A10B | 60.3% | 97.7% | 9.4% | 36.2% | 97.2% |
 | Qwen/Qwen3.5-35B-A3B | 59.6% | 94.3% | 4.9% | 30.2% | 97.2% |
 | zai-org/GLM-4.7-Flash | 53.0% | 69.2% | 22.5% | 29.4% | 80.5% |
+
+¹ The scoring detector (fastText `lid.176`) maps both `__label__ms` and `__label__id` to `malay`, so replies in **Indonesian** are credited as correct Malay. See the corrected scores below.
+
+---
+
+## Malay accuracy — corrected for Indonesian leakage
+
+fastText cannot reliably distinguish Malaysian Malay from Indonesian, so a model that replies in Indonesian instead of Malaysian Malay is still scored as a correct `malay` match.
+
+[`detect_indonesian.py`](detect_indonesian.py) flags Malay-target replies containing distinctly Indonesian words that are **not** valid Malaysian Malay (e.g. `nomor`/nombor, `konfirmasi`/pengesahan, `karena`/kerana, `mobil`/kereta, `diprioritaskan`/diutamakan). Matching is whole-token and excludes false friends shared with Malay. The table removes those false credits from the Malay match count.
+
+| Model | Malay (raw) | Indonesian leak | Malay (corrected) | Overall (corrected) |
+|---|---|---|---|---|
+| Qwen/Qwen3.6-27B | 56.7% (287/506) | 11 | **54.5%** (276/506) | 67.3% |
+| mistralai/Mistral-Small-4-119B-2603 | 86.0% (430/500) | 11 | **83.8%** (419/500) | 65.4% |
+| MiniMaxAI/MiniMax-M2.7 | 32.1% (162/505) | 6 | **30.9%** (156/505) | 64.5% |
+| google/gemma-4-31B-it | 82.0% (415/506) | 2 | **81.6%** (413/506) | 63.8% |
+| Qwen/Qwen3.5-397B-A17B | 33.3% (167/501) | 7 | **31.9%** (160/501) | 61.5% |
+| Qwen/Qwen3.5-122B-A10B | 36.2% (180/497) | 7 | **34.8%** (173/497) | 60.0% |
+| Qwen/Qwen3.5-35B-A3B | 30.2% (150/496) | 5 | **29.2%** (145/496) | 59.4% |
+| zai-org/GLM-4.7-Flash | 29.4% (148/504) | 21 | **25.2%** (127/504) | 52.3% |
+
+GLM-4.7-Flash leaks the most Indonesian (21 of its 148 credited Malay matches); gemma-4-31B the least (2). Reproduce with `python detect_indonesian.py results/*/`.
 
 ---
 
