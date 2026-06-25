@@ -61,16 +61,16 @@ fastText cannot reliably distinguish Malaysian Malay from Indonesian, so a model
 
 | Model | Malay (raw) | Indonesian leak | Malay (corrected) | Overall (corrected) |
 |---|---|---|---|---|
-| Qwen/Qwen3.6-27B | 56.7% (287/506) | 11 | **54.5%** (276/506) | 67.3% |
-| mistralai/Mistral-Small-4-119B-2603 | 86.0% (430/500) | 11 | **83.8%** (419/500) | 65.4% |
-| MiniMaxAI/MiniMax-M2.7 | 32.1% (162/505) | 6 | **30.9%** (156/505) | 64.5% |
-| google/gemma-4-31B-it | 82.0% (415/506) | 2 | **81.6%** (413/506) | 63.8% |
-| Qwen/Qwen3.5-397B-A17B | 33.3% (167/501) | 7 | **31.9%** (160/501) | 61.5% |
-| Qwen/Qwen3.5-122B-A10B | 36.2% (180/497) | 7 | **34.8%** (173/497) | 60.0% |
-| Qwen/Qwen3.5-35B-A3B | 30.2% (150/496) | 5 | **29.2%** (145/496) | 59.4% |
-| zai-org/GLM-4.7-Flash | 29.4% (148/504) | 21 | **25.2%** (127/504) | 52.3% |
+| Qwen/Qwen3.6-27B | 56.7% (287/506) | 26 | **51.6%** (261/506) | 66.8% |
+| mistralai/Mistral-Small-4-119B-2603 | 86.0% (430/500) | 22 | **81.6%** (408/500) | 65.0% |
+| MiniMaxAI/MiniMax-M2.7 | 32.1% (162/505) | 8 | **30.5%** (154/505) | 64.4% |
+| google/gemma-4-31B-it | 82.0% (415/506) | 5 | **81.0%** (410/506) | 63.7% |
+| Qwen/Qwen3.5-397B-A17B | 33.3% (167/501) | 10 | **31.3%** (157/501) | 61.4% |
+| Qwen/Qwen3.5-122B-A10B | 36.2% (180/497) | 9 | **34.4%** (171/497) | 60.0% |
+| Qwen/Qwen3.5-35B-A3B | 30.2% (150/496) | 15 | **27.2%** (135/496) | 59.1% |
+| zai-org/GLM-4.7-Flash | 29.4% (148/504) | 40 | **21.4%** (108/504) | 51.6% |
 
-GLM-4.7-Flash leaks the most Indonesian (21 of its 148 credited Malay matches); gemma-4-31B the least (2). Reproduce with `python detect_indonesian.py results/*/`.
+GLM-4.7-Flash leaks the most Indonesian (40 of its 148 credited Malay matches); gemma-4-31B the least (5). Reproduce with `python detect_indonesian.py results/*/`.
 
 ---
 

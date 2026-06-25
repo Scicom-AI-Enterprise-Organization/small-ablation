@@ -410,6 +410,190 @@ rejected_words = [
     "pokoknya",        # ms: yang penting / pendek kata
     "intinya",         # ms: pada intinya
     "kayaknya",        # ms: nampaknya / agaknya
+
+    # --- High-frequency function / pronoun / discourse ----------------------
+    "kalian",          # ms: kamu semua / anda semua
+    "bagian",          # ms: bahagian
+    "sebagian",        # ms: sebahagian
+    "lagian",          # ms: lagipun
+    "mendingan",       # ms: lebih baik
+    "gausah",          # ms: tak payah
+    "yaudah",          # ms: dahlah / sudahlah
+    "barusan",         # ms: baru tadi
+    "telat",           # ms: lambat / lewat
+    "dapet",           # ms: dapat
+    "pake",            # ms: pakai
+
+    # --- Banking / insurance / finance --------------------------------------
+    "asuransi",        # ms: insurans
+    "cicilan",         # ms: ansuran / bayaran ansuran
+    "angsuran",        # ms: ansuran
+    "kartu",           # ms: kad
+    "nomer",           # ms: nombor
+    "setoran",         # ms: deposit
+    "utang",           # ms: hutang
+    "materai",         # ms: setem hasil  (NB: ms "meterai" = seal, excluded)
+    "antre",           # ms: beratur / giliran
+    "antri",           # ms: beratur / giliran
+    "antrean",         # ms: barisan / giliran
+    "kasir",           # ms: juruwang
+
+    # --- Tech / devices -----------------------------------------------------
+    "fitur",           # ms: ciri / fungsi
+    "tombol",          # ms: butang
+    "baterai",         # ms: bateri
+    "unduh",           # ms: muat turun
+    "unggah",          # ms: muat naik
+    "unduhan",         # ms: muat turun
+    "unggahan",        # ms: muat naik
+    "tautan",          # ms: pautan
+    "ngecas",          # ms: mengecas
+
+    # --- Medical ------------------------------------------------------------
+    "resep",           # ms: preskripsi / ubat
+
+    # --- Education ----------------------------------------------------------
+    "dosen",           # ms: pensyarah
+    "beasiswa",        # ms: biasiswa
+    "rapor",           # ms: kad laporan
+
+    # --- Places / Indonesian admin divisions --------------------------------
+    "toko",            # ms: kedai
+    "kecamatan",       # ms: daerah / mukim
+    "kelurahan",       # ms: mukim
+    "kabupaten",       # ms: daerah
+    "losmen",          # ms: rumah tumpangan
+    "kosan",           # ms: bilik sewa
+    "kost",            # ms: bilik sewa
+    "halte",           # ms: perhentian bas
+    "ojek",            # ms: motosikal sewa
+    "begal",           # ms: perompak / penyamun
+
+    # --- Household ----------------------------------------------------------
+    "seprai",          # ms: cadar
+    "sprei",           # ms: cadar
+    "gorden",          # ms: langsir
+    "wastafel",        # ms: besen / sinki
+    "keran",           # ms: paip
+    "bohlam",          # ms: mentol
+    "stopkontak",      # ms: soket
+    "nyuci",           # ms: mencuci / membasuh
+
+    # --- Food / clothing ----------------------------------------------------
+    "bakso",           # ms: bebola daging
+    "wortel",          # ms: lobak merah
+    "gurih",           # ms: sedap / lemak
+    "kaus",            # ms: baju-T
+    "dasi",            # ms: tali leher
+
+    # --- Family / people ----------------------------------------------------
+    "istri",           # ms: isteri
+    "kakek",           # ms: datuk / atuk
+    "keponakan",       # ms: anak saudara
+    "temen",           # ms: kawan / teman
+    "ortu",            # ms: ibu bapa (orang tua)
+
+    # --- Feelings / adjectives ----------------------------------------------
+    "kaget",           # ms: terkejut
+    "khawatir",        # ms: khuatir / risau
+    "kuatir",          # ms: khuatir / risau
+    "lemot",           # ms: lembab / perlahan
+
+    # --- Colloquial verbs (ng-/ny-/-in) -------------------------------------
+    "ngebut",          # ms: memandu laju
+    "nyetir",          # ms: memandu
+    "nanya",           # ms: tanya
+    "nanyain",         # ms: bertanya
+    "bantuin",         # ms: tolong / bantu
+    "benerin",         # ms: betulkan / baiki
+    "beresin",         # ms: kemaskan / selesaikan
+    "ngambil",         # ms: ambil
+    "naruh",           # ms: letak
+    "bayarin",         # ms: bayarkan
+    "mesen",           # ms: pesan / tempah
+    "ketemuan",        # ms: berjumpa
+    "mudik",           # ms: balik kampung
+
+    # --- Indonesian-only spelling variants ----------------------------------
+    "praktek",         # ms: praktik / amalan
+    "nasehat",         # ms: nasihat
+
+    # --- Call-centre / customer-service terms -------------------------------
+    # Billing & finance
+    "biaya",           # ms: kos / caj / yuran
+    "iuran",           # ms: yuran / caruman
+    "tagihan",         # ms: bil
+    "melunasi",        # ms: menjelaskan / melangsaikan
+    "pelunasan",       # ms: penyelesaian / pelangsaian
+    "pengembalian",    # ms: pemulangan (refund)
+    # Telco / connectivity
+    "sinyal",          # ms: isyarat / signal
+    "koneksi",         # ms: sambungan
+    "terhubung",       # ms: tersambung
+    "aktivasi",        # ms: pengaktifan
+    # Account / policy / terms
+    "kebijakan",       # ms: dasar / polisi
+    "ketentuan",       # ms: terma / syarat / peruntukan
+    "kadaluarsa",      # ms: luput / tamat tempoh
+    "kadaluwarsa",     # ms: luput / tamat tempoh
+    "kedaluwarsa",     # ms: luput / tamat tempoh
+    "berlangganan",    # ms: melanggan / langganan
+    "registrasi",      # ms: pendaftaran
+    "pemesanan",       # ms: tempahan
+    "terkirim",        # ms: dihantar / terhantar
+    "mengonfirmasi",   # ms: mengesahkan
+    "dikonfirmasi",    # ms: disahkan
+    "pengecekan",      # ms: semakan
+    # Service flow / complaints / feedback
+    "kendala",         # ms: masalah / kekangan / halangan
+    "keluhan",         # ms: aduan
+    "pengaduan",       # ms: aduan
+    "menindaklanjuti", # ms: tindakan susulan / menyusuli
+    "rincian",         # ms: butiran / perincian
+    "ketidaknyamanan", # ms: ketidakselesaan
+    "survei",          # ms: tinjauan / kaji selidik
+
+    # --- Call-centre: insurance / banking / loans ---------------------------
+    "pertanggungan",   # ms: perlindungan / liputan
+    "mengajukan",      # ms: mengemukakan / membuat permohonan
+    "pengajuan",       # ms: permohonan
+    "santunan",        # ms: pampasan / khairat
+    "tertanggung",     # ms: pihak yang dilindungi
+    "agunan",          # ms: cagaran
+    "plafon",          # ms: had / siling kredit
+    # --- Call-centre: airline / travel --------------------------------------
+    "maskapai",        # ms: syarikat penerbangan
+    "keterlambatan",   # ms: kelewatan
+    "penjadwalan",     # ms: penjadualan
+    "rute",            # ms: laluan
+    # NB: keberangkatan/penundaan/ditunda removed — borderline with Malay
+    # ("keberangkatan tiba" is formal Malay; Malay has "menunda"/"tunda").
+    # Flight delay is still covered by the clearly-ID "tertunda".
+    # --- Call-centre: telco / connectivity ----------------------------------
+    "kecepatan",       # ms: kelajuan
+    "operasional",     # ms: operasi (waktu operasi)
+    # --- Call-centre: healthcare --------------------------------------------
+    "pasien",          # ms: pesakit
+    "bpjs",            # ms: (insurans kesihatan Indonesia)
+    # --- Call-centre: account / status / process verbs ----------------------
+    "terdaftar",       # ms: berdaftar
+    "nonaktif",        # ms: tidak aktif
+    "menonaktifkan",   # ms: menyahaktifkan / mematikan
+    "blokir",          # ms: sekat / blok
+    "memblokir",       # ms: menyekat
+    "berhasil",        # ms: berjaya
+    "sukses",          # ms: berjaya
+    "terjadwal",       # ms: dijadualkan
+    "pembaruan",       # ms: kemaskini
+    "memperbarui",     # ms: mengemaskini
+    "diperbarui",      # ms: dikemaskini
+    "perbarui",        # ms: kemaskini
+    "menginformasikan",# ms: memaklumkan
+    "mengabari",       # ms: memberitahu / mengkhabarkan
+    "merubah",         # ms: mengubah
+    "fotokopi",        # ms: fotostat / salinan
+    "stempel",         # ms: cop / setem
+    "ongkir",          # ms: kos penghantaran (ongkos kirim)
 ]
 
 # Multi-word / hyphenated markers (matched with word boundaries) -------------
@@ -424,6 +608,23 @@ rejected_phrases = [
     "sepeda motor",    # ms: motosikal
     "selamat siang",   # ms: selamat tengah hari
     "selamat sore",    # ms: selamat petang
+    "rawat inap",      # ms: rawatan dalam wad
+    "rawat jalan",     # ms: rawatan pesakit luar
+    "makan siang",     # ms: makan tengah hari
+    "kaus kaki",       # ms: stoking / sarung kaki
+    # Call-centre phrases
+    "jatuh tempo",     # ms: tarikh matang / tempoh matang
+    "isi ulang",       # ms: tambah nilai / topup
+    "tarik tunai",     # ms: pengeluaran tunai
+    "syarat dan ketentuan",  # ms: terma dan syarat
+    "umpan balik",     # ms: maklum balas
+    "tindak lanjut",   # ms: tindakan susulan
+    "kata sandi",      # ms: kata laluan
+    "layanan pelanggan",     # ms: khidmat / perkhidmatan pelanggan
+    "suku bunga",      # ms: kadar faedah / kadar bunga
+    "gawat darurat",   # ms: kecemasan
+    "masa tenggang",   # ms: tempoh tangguh (grace period)
+    "data diri",       # ms: maklumat / butiran peribadi
 ]
 
 # ---------------------------------------------------------------------------
@@ -445,6 +646,8 @@ _PHRASE_RES = [
 _RULE_RES = [
     ("-itas", re.compile(r"^[a-z]{3,}itas(?:nya)?$")),
 ]
+# Latin/English words ending "-itas" that the rule must NOT flag in English text.
+_RULE_EXCLUDE = {"gravitas", "veritas", "caritas", "civitas"}
 
 
 def extract_reply(text: str) -> str:
@@ -469,6 +672,8 @@ def find_indonesian(text: str) -> Counter:
     for tok in _WORD_RE.findall(low):
         if tok in _REJECTED:
             hits[tok] += 1
+            continue
+        if tok in _RULE_EXCLUDE:
             continue
         for _, rx in _RULE_RES:
             if rx.match(tok):
