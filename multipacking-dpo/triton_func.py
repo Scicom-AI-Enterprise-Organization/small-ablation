@@ -208,24 +208,29 @@ def _fused_log_prob_kernel(
     tl.store(output_ptr + token_idx, log_prob)
 
 
-def get_sum_logprob_triton_online(inputs, targets, weight, chunk_size=512, ignore_index=-100):
+def get_sum_logprob_triton_online(inputs, targets, weight, chunk_size=4096, ignore_index=-100, average_log_prob=False):
     """
     Memory-efficient version using online softmax algorithm.
     Never materializes full [chunk_size, V] logits matrix.
     """
-    sum_log_prob = 0.0
+    device = inputs.device
+    sum_log_prob = torch.tensor(0.0, device=device, dtype=torch.float32)
     BT, H = inputs.shape
     V = weight.shape[0]
+    
+    # Ensure inputs are float32 for numerical stability
+    inputs = inputs.float()
+    weight = weight.float()
     
     for start_idx in range(0, BT, chunk_size):
         end_idx = min(start_idx + chunk_size, BT)
         current_chunk_size = end_idx - start_idx
         
-        _inputs_chunk = inputs[start_idx:end_idx]
-        _targets_chunk = targets[start_idx:end_idx]
+        _inputs_chunk = inputs[start_idx:end_idx].contiguous()
+        _targets_chunk = targets[start_idx:end_idx].contiguous()
         
         # Allocate output
-        chunk_log_probs = torch.zeros(current_chunk_size, device=inputs.device, dtype=torch.float32)
+        chunk_log_probs = torch.zeros(current_chunk_size, device=device, dtype=torch.float32)
         
         # Tune block sizes based on H and V
         BLOCK_H = min(triton.next_power_of_2(H), 128)
@@ -248,26 +253,32 @@ def get_sum_logprob_triton_online(inputs, targets, weight, chunk_size=512, ignor
         
         sum_log_prob += chunk_log_probs.sum()
     
-    num_valid_tokens = (targets != ignore_index).sum()
-    return sum_log_prob / num_valid_tokens
+    if average_log_prob:
+        num_valid_tokens = (targets != ignore_index).sum()
+        sum_log_prob = sum_log_prob / num_valid_tokens
+    return sum_log_prob
 
-
-def get_sum_logprob_triton_fused(inputs, targets, weight, chunk_size=512, ignore_index=-100):
+def get_sum_logprob_triton_fused(inputs, targets, weight, chunk_size=4096, ignore_index=-100, average_log_prob=False):
     """
     Fused kernel version with tiled computation.
     """
-    sum_log_prob = 0.0
+    device = inputs.device
+    sum_log_prob = torch.tensor(0.0, device=device, dtype=torch.float32)
     BT, H = inputs.shape
     V = weight.shape[0]
+    
+    # Ensure inputs are float32 for numerical stability
+    inputs = inputs.float()
+    weight = weight.float()
     
     for start_idx in range(0, BT, chunk_size):
         end_idx = min(start_idx + chunk_size, BT)
         current_chunk_size = end_idx - start_idx
         
-        _inputs_chunk = inputs[start_idx:end_idx]
-        _targets_chunk = targets[start_idx:end_idx]
+        _inputs_chunk = inputs[start_idx:end_idx].contiguous()
+        _targets_chunk = targets[start_idx:end_idx].contiguous()
         
-        chunk_log_probs = torch.zeros(current_chunk_size, device=inputs.device, dtype=torch.float32)
+        chunk_log_probs = torch.zeros(current_chunk_size, device=device, dtype=torch.float32)
         
         BLOCK_H = min(triton.next_power_of_2(H), 128)
         BLOCK_V = min(256, triton.next_power_of_2(V // 16))
@@ -290,22 +301,28 @@ def get_sum_logprob_triton_fused(inputs, targets, weight, chunk_size=512, ignore
         )
         
         sum_log_prob += chunk_log_probs.sum()
-    
-    num_valid_tokens = (targets != ignore_index).sum()
-    return sum_log_prob / num_valid_tokens
+
+    if average_log_prob:
+        num_valid_tokens = (targets != ignore_index).sum()
+        sum_log_prob = sum_log_prob / num_valid_tokens
+    return sum_log_prob
 
 
 # Original implementation for comparison
-def get_sum_logprob_original(inputs, targets, weight, chunk_size=512, ignore_index=-100):
+def get_sum_logprob_original(inputs, targets, weight, chunk_size=512, ignore_index=-100, average_log_prob=False):
     sum_log_prob = 0.0
     BT, H = inputs.shape
+
+    # Ensure inputs are float32 for numerical stability
+    inputs = inputs.float()
+    weight = weight.float()
     
     for start_idx in range(0, BT, chunk_size):
         end_idx = min(start_idx + chunk_size, BT)
         _inputs_chunk = inputs[start_idx:end_idx]
         _targets_chunk = targets[start_idx:end_idx]
     
-        logits = _inputs_chunk.to(torch.float32) @ weight.T
+        logits = _inputs_chunk @ weight.T
         log_probs_chunk = F.log_softmax(logits.float(), dim=-1)
         
         loss_mask = _targets_chunk != ignore_index
@@ -313,14 +330,47 @@ def get_sum_logprob_original(inputs, targets, weight, chunk_size=512, ignore_ind
         per_token_logps = log_probs_chunk.gather(-1, label_chunk.unsqueeze(-1)).squeeze(-1)
         log_prob = (per_token_logps * loss_mask).sum(-1)
         sum_log_prob += log_prob
+
+    if average_log_prob:
+        sum_log_prob = sum_log_prob / (targets != ignore_index).sum()
+    return sum_log_prob
+
+
+def pad_dim1(tensors, padding_value=0):
+    tensors = [t.unsqueeze(0) if t.dim() == 2 else t for t in tensors]
+
+    max_len = max(t.shape[1] for t in tensors)
+
+    padded = []
+    for t in tensors:
+        pad_len = max_len - t.shape[1]
+        if pad_len > 0:
+            t = F.pad(t, (0, 0, 0, pad_len), value=padding_value)
+        padded.append(t)
+
+    return torch.cat(padded, dim=0)
+
+def get_logprobs(
+    inputs_chosen, 
+    inputs_rejected, 
+    refs_chosen, 
+    refs_rejected, 
+    targets_chosen, 
+    targets_rejected, 
+    inputs_weight, 
+    refs_weight,
+):
+
+    logpprob_inputs_chosen = get_sum_logprob_triton_online(inputs_chosen, targets_chosen, inputs_weight)
+    logpprob_inputs_rejected = get_sum_logprob_triton_online(inputs_rejected, targets_rejected, inputs_weight)
+    logpprob_refs_chosen = get_sum_logprob_triton_online(refs_chosen, targets_chosen, refs_weight)
+    logpprob_refs_rejected = get_sum_logprob_triton_online(refs_rejected, targets_rejected, refs_weight)
+
+    return logpprob_inputs_chosen, logpprob_inputs_rejected, logpprob_refs_chosen, logpprob_refs_rejected
     
-    return sum_log_prob / (targets != ignore_index).sum()
-
-
-# Example usage and testing
 if __name__ == "__main__":
     # Test parameters
-    BT, H, V = 1025, 4096, 32000
+    BT, H, V = 1000, 4096, 32000
     chunk_size = 256
     
     device = torch.device("cuda")
@@ -343,3 +393,62 @@ if __name__ == "__main__":
     
     print(f"\nDifference (online vs original): {abs(result_online.item() - result_original.item()):.6e}")
     print(f"Difference (fused vs original): {abs(result_fused.item() - result_original.item()):.6e}")
+
+    # https://huggingface.co/Qwen/Qwen3-32B/blob/main/config.json#L11
+    inputs_chosen = torch.randn(10000, 5120, dtype=torch.bfloat16).cuda()
+    inputs_rejected = torch.randn(5000, 5120, dtype=torch.bfloat16).cuda()
+    refs_chosen = torch.randn(10000, 5120, dtype=torch.bfloat16).cuda()
+    refs_rejected = torch.randn(5000, 5120, dtype=torch.bfloat16).cuda()
+    
+    # https://huggingface.co/Qwen/Qwen3-32B/blob/main/config.json#L29
+    targets_chosen = torch.randint(low=0, high=151936, size=(10000,)).cuda()
+    targets_rejected = torch.randint(low=0, high=151936, size=(5000,)).cuda()
+
+    from torch.nn.utils.rnn import pad_sequence
+    from liger_kernel.chunked_loss import LigerFusedLinearDPOLoss
+    
+    targets = pad_sequence([targets_chosen, targets_rejected], batch_first=True, padding_value=-100).cuda()
+    
+    # assumed packing 1 sequences
+    # liger divide by batch size // 2
+    num_seqs = 1
+    
+    inputs_padded = pad_dim1([inputs_chosen, inputs_rejected])
+    refs_padded = pad_dim1([refs_chosen, refs_rejected])
+
+    inputs_weight = torch.nn.Linear(5120, 151936).cuda()
+    refs_weight = torch.nn.Linear(5120, 151936).cuda()
+
+    out = get_logprobs(
+        inputs_chosen=inputs_chosen,
+        inputs_rejected=inputs_rejected,
+        refs_chosen=refs_chosen,
+        refs_rejected=refs_rejected,
+        targets_chosen=targets_chosen,
+        targets_rejected=targets_rejected,
+        inputs_weight=inputs_weight.weight,
+        refs_weight=refs_weight.weight,
+    )
+
+    logpprob_inputs_chosen, logpprob_inputs_rejected, logpprob_refs_chosen, logpprob_refs_rejected = out
+
+    beta = 0.1
+    chosen_logratios = logpprob_inputs_chosen - logpprob_refs_chosen
+    rejected_logratios = logpprob_inputs_rejected - logpprob_refs_rejected
+    
+    chosen_rewards = beta * chosen_logratios
+    rejected_rewards = beta * rejected_logratios
+    logits_diff = beta * (chosen_logratios - rejected_logratios)
+    loss = -F.logsigmoid(logits_diff)
+
+    liger_loss = LigerFusedLinearDPOLoss()
+
+    out = liger_loss(
+        inputs_weight.weight,
+        inputs_padded.to(torch.float32),
+        targets,
+        ref_input=refs_padded.to(torch.float32),
+        ref_weight=refs_weight.weight
+    )
+    print(f"\nDifference loss (online vs liger dpo): {abs(loss.item() - out[0].item()):.6e}")
+    

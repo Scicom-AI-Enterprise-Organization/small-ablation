@@ -1,2 +1,12 @@
 *__pycache__
 *.ipynb_checkpoints
+TRAINING_*.md
+.claude
+_tmp_specs
+checkpoints*
+*.parquet
+out
+test
+train
+_*.py
+*.log
